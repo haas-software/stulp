@@ -8,10 +8,10 @@ license.workspace = true
 [dependencies]
 rand_chacha = { version = "=0.3.1", default-features = false }
 rand_core = { version = "=0.6.4", default-features = false }
-hop-sync = { package = "sync", git = "https://github.com/xinix00/HopOS.git", tag = "v3.0.13" }
+hop-sync = { package = "sync", git = "https://github.com/xinix00/HopOS.git", tag = "v3.2.0-rc3" }
 stulp-core = { path = "../core" }
 stulp-protocol = { path = "../protocol" }
-leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.1.12" }
+leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
 
 [lints]
 workspace = true

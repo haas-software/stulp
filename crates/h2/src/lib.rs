@@ -7,10 +7,9 @@
 //! `leanh2::client::send`. Eén verzoek per verbinding: APNs ziet er een paar
 //! per dag, en dan is een open verbinding bijhouden meer staat dan het waard is.
 //!
-//! TLS en HTTP/2 komen uit Lean v3.1.15 (ALPN, de HTTP/2-client en het lege
-//! clientcertificaat dat APNs vraagt); de TCP-kant blijft op de leanhttp van
-//! HopOS' `applib`. Neemt Stulp een `applib` op dezelfde Lean, dan kan dit
-//! weer over `leanhttps::WebDial` met `alpn`.
+//! TLS en HTTP/2 komen uit Lean (ALPN, de HTTP/2-client en het lege
+//! clientcertificaat dat APNs vraagt), op dezelfde tag als de leanhttp van
+//! HopOS' `applib`; dit kan dus ook over `leanhttps::WebDial` met `alpn`.
 #![no_std]
 #![forbid(unsafe_code)]
 extern crate alloc;

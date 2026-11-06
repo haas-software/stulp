@@ -743,7 +743,7 @@ async fn worker(
                         archive,
                     } = std::mem::replace(&mut response.body, stulp_web::Body::Static(b""))
                     else {
-                        return Err(leanhttp::Error::Connect);
+                        return Err(leanhttp::Error::Io(leanhttp::IoError::Other));
                     };
                     let prepared = crate::archive::Prepared::read(
                         &mut std::io::Cursor::new(archive),
@@ -805,8 +805,21 @@ async fn worker(
             },
         )
         .await;
-        if let Err(e) = result {
-            eprintln!("[stulp:connection] {e}");
+        match result {
+            Ok(leanhttp::Outcome::Closed) => (),
+            // Kan niet: elk antwoord zegt `Connection: close`. Een volgend
+            // verzoek op deze verbinding liep niet langs `upload::matches`
+            // (een restore boven de grens van leanhttp kreeg dan 413), en
+            // een stille keep-alive-verbinding hield deze thread vast. Komt
+            // er toch een, dan sluit hij hier.
+            Ok(leanhttp::Outcome::Kept(kept)) => kept.close().await,
+            // Geen handler hier neemt de verbinding over; wie het toch doet,
+            // krijgt haar gesloten.
+            Ok(leanhttp::Outcome::Hijacked(hijacked)) => {
+                let mut conn = hijacked.conn;
+                let _ = leanhttp::close(&mut conn).await;
+            }
+            Err(e) => eprintln!("[stulp:connection] {e}"),
         }
     }
 }

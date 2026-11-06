@@ -258,7 +258,7 @@ mod tests {
                     // Read across different Go and Rust TLS record boundaries.
                     block_on(read_exact(&mut conn, &mut data)).unwrap();
                     block_on(write_all(&mut conn, &data)).unwrap();
-                    block_on(conn.close_notify()).unwrap();
+                    block_on(core::future::poll_fn(|cx| conn.poll_close_notify(cx))).unwrap();
                 } else {
                     assert!(result.is_err(), "{algorithm} {mode} accepted");
                 }

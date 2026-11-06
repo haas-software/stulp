@@ -17,7 +17,7 @@ the provider's live lockout must expire before connectivity can be confirmed.
 
 ## Build and run
 
-Rust 1.93.0 / edition 2024 is pinned. Lean (v3.1.12) and HopOS (v3.0.13)
+Rust 1.93.0 / edition 2024 is pinned. Lean (v3.2.0-rc2) and HopOS (v3.2.0-rc3)
 dependencies use tagged git revisions in `Cargo.lock`, one version of each. From Hop
 only `types` remains, as a source overlay pinned by local source hashes in
 `vendor/PROVENANCE.md`; SHA-256, HMAC, the constant-time comparison and base64 come
@@ -563,7 +563,7 @@ options or hop limits still cannot populate the neighbor cache. The regression
 test is `thread_route_without_sllao_learns_validated_ethernet_neighbor` in the
 shared Lean checkout; include that fix when building this plugin pack.
 
-The HopOS SDK (`applib`, v3.0.13) brings the IPv6 lane itself: leannet v3.1.12 with
+The HopOS SDK (`applib`, v3.2.0-rc3) brings the IPv6 lane itself: leannet v3.2.0-rc2 with
 its `ipv6` feature. Stulp no longer carries an SDK copy or reads Lean from a sibling
 checkout; the SDK and netstack suites run in their own repositories.
 

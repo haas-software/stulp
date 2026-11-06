@@ -4,12 +4,12 @@ version = 4
 
 [[package]]
 name = "abi"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 dependencies = [
  "bounded",
  "dev",
- "leancrypto 3.1.12",
+ "leancrypto",
 ]
 
 [[package]]
@@ -26,8 +26,8 @@ dependencies = [
 
 [[package]]
 name = "applib"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 dependencies = [
  "abi",
  "bounded",
@@ -69,8 +69,8 @@ dependencies = [
 
 [[package]]
 name = "bounded"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 
 [[package]]
 name = "cfg-if"
@@ -164,8 +164,8 @@ dependencies = [
 
 [[package]]
 name = "dev"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 
 [[package]]
 name = "digest"
@@ -239,8 +239,8 @@ dependencies = [
 
 [[package]]
 name = "executor"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 dependencies = [
  "dev",
  "sync",
@@ -286,8 +286,8 @@ dependencies = [
 
 [[package]]
 name = "heap"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 
 [[package]]
 name = "hkdf"
@@ -327,62 +327,49 @@ dependencies = [
 
 [[package]]
 name = "leanbase64"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leancookie"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leancrypto"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
-
-[[package]]
-name = "leancrypto"
-version = "3.1.15"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.15#7bd46bbdd581caca068ccf6476d3e1ba0e09d3a9"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leanh2"
-version = "3.1.15"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.15#7bd46bbdd581caca068ccf6476d3e1ba0e09d3a9"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leanhttp"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leanhttps"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 dependencies = [
  "leanhttp",
- "leantls 3.1.12",
+ "leantls",
 ]
 
 [[package]]
 name = "leannet"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 
 [[package]]
 name = "leantls"
-version = "3.1.12"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.12#30dfbd73743a57b59ad42ed0258b7e3c10d04b20"
+version = "3.2.0"
+source = "git+https://github.com/xinix00/lean.git?tag=v3.2.0-rc2#cf1623de98e2125e377fe0f201c40cc78b4e018f"
 dependencies = [
- "leancrypto 3.1.12",
-]
-
-[[package]]
-name = "leantls"
-version = "3.1.15"
-source = "git+https://github.com/xinix00/lean.git?tag=v3.1.15#7bd46bbdd581caca068ccf6476d3e1ba0e09d3a9"
-dependencies = [
- "leancrypto 3.1.15",
+ "leancrypto",
 ]
 
 [[package]]
@@ -399,8 +386,8 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "netdev"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 dependencies = [
  "sync",
 ]
@@ -725,7 +712,7 @@ version = "3.0.37"
 dependencies = [
  "leanhttp",
  "leanhttps",
- "leantls 3.1.12",
+ "leantls",
 ]
 
 [[package]]
@@ -734,7 +721,7 @@ version = "3.0.37"
 dependencies = [
  "leanh2",
  "leanhttp",
- "leantls 3.1.15",
+ "leantls",
  "stulp-core",
  "stulp-sdk",
 ]
@@ -746,7 +733,7 @@ dependencies = [
  "applib",
  "leanhttp",
  "leanhttps",
- "leantls 3.1.12",
+ "leantls",
  "stulp-controller",
  "stulp-core",
  "stulp-device-tls",
@@ -812,7 +799,7 @@ dependencies = [
  "der",
  "hkdf",
  "hmac",
- "leancrypto 3.1.12",
+ "leancrypto",
  "p256",
  "sha2",
  "stulp-core",
@@ -829,7 +816,7 @@ dependencies = [
 name = "stulp-nibe"
 version = "3.0.37"
 dependencies = [
- "leancrypto 3.1.12",
+ "leancrypto",
  "stulp-core",
  "stulp-platform",
  "stulp-plugin-host",
@@ -887,7 +874,7 @@ name = "stulp-protocol"
 version = "3.0.37"
 dependencies = [
  "leanbase64",
- "leancrypto 3.1.12",
+ "leancrypto",
  "stulp-core",
 ]
 
@@ -943,7 +930,7 @@ dependencies = [
 name = "stulp-spotify"
 version = "3.0.37"
 dependencies = [
- "leancrypto 3.1.12",
+ "leancrypto",
  "stulp-core",
  "stulp-platform",
  "stulp-plugin-host",
@@ -959,7 +946,7 @@ dependencies = [
  "ed25519-dalek",
  "leanhttp",
  "leanhttps",
- "leantls 3.1.12",
+ "leantls",
  "p256",
  "p384",
  "rand_chacha",
@@ -976,7 +963,7 @@ name = "stulp-unifi"
 version = "3.0.37"
 dependencies = [
  "leanbase64",
- "leancrypto 3.1.12",
+ "leancrypto",
  "stulp-core",
  "stulp-platform",
  "stulp-plugin-host",
@@ -1013,7 +1000,8 @@ dependencies = [
 name = "stulp-web"
 version = "3.0.37"
 dependencies = [
- "leancrypto 3.1.12",
+ "leancrypto",
+ "leanhttp",
  "stulp-core",
  "stulp-protocol",
 ]
@@ -1060,8 +1048,8 @@ dependencies = [
 
 [[package]]
 name = "sync"
-version = "3.0.13"
-source = "git+https://github.com/xinix00/HopOS.git?tag=v3.0.13#ba0006d2159b0dcf4e51fa787cd0b11defe8cc25"
+version = "3.2.0-rc3"
+source = "git+https://github.com/xinix00/HopOS.git?tag=v3.2.0-rc3#092cb539f563e742cc8de6f6444839daa83cd9af"
 dependencies = [
  "bounded",
 ]

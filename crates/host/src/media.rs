@@ -70,14 +70,14 @@ pub(crate) async fn pipe(
         let n = upstream
             .read(&mut buffer)
             .await
-            .map_err(|_| leanhttp::Error::Connect)?;
+            .map_err(|_| leanhttp::Error::Dial)?;
         if n == 0 {
             return Ok(());
         }
         if mime.starts_with("image/") {
             total = total.saturating_add(n);
             if total > 4 << 20 {
-                return Err(leanhttp::Error::Connect);
+                return Err(leanhttp::Error::Dial);
             }
         }
         exchange.write(&buffer[..n]).await?;

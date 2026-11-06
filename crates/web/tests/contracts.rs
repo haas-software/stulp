@@ -552,3 +552,143 @@ fn client_log_route_accepts_one_bounded_line_and_rejects_the_rest() {
         assert!(err.is_err() || err.unwrap().status >= 400, "{body}");
     }
 }
+
+/// De REST-tabel achter de Mux (06-11-2026) antwoordt precies zoals de
+/// handgeschreven routering ervoor: ook waar een pad hier alleen een andere
+/// methode kent een 404, want de controller routeert daarna zelf verder
+/// (herstarten, wissen, koppelen, capability's zetten).
+#[test]
+fn rest_routing_keeps_status_and_body_per_method_and_path() {
+    let mut store = store();
+    store
+        .announce(
+            "a",
+            json::parse(
+                br#"{"id":"a","sdk":3,"version":"1.0","name":{"en":"Lights"},"drivers":[]}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let device = br#"{"id":"d","appId":"a","driverId":"lamp","class":"light","capabilities":["onoff"],"state":{"onoff":true}}"#;
+    store
+        .put("devices", json::parse(device).unwrap(), true, None, "now")
+        .unwrap();
+    let web = Web::new("").unwrap();
+    let cases: &[(&str, &str, u16, &str)] = &[
+        // Van de diensten achter de controller: hier een 404.
+        (
+            "POST",
+            "/api/manager/apps/app/a/restart",
+            404,
+            "route not found",
+        ),
+        ("DELETE", "/api/manager/apps/app/a", 404, "route not found"),
+        (
+            "PUT",
+            "/api/manager/devices/device/d/capability/onoff",
+            404,
+            "route not found",
+        ),
+        (
+            "GET",
+            "/api/stulp/apps/a/registrations",
+            404,
+            "route not found",
+        ),
+        ("POST", "/api/stulp/pair", 404, "route not found"),
+        (
+            "DELETE",
+            "/api/manager/devices/device/d",
+            404,
+            "device removal requires app callback",
+        ),
+        // Een andere methode op een eigen pad: ook 404, zoals ervoor.
+        ("GET", "/api/stulp/log", 404, "route not found"),
+        ("POST", "/api/stulp/statistics", 404, "route not found"),
+        ("DELETE", "/api/stulp/system", 404, "route not found"),
+        (
+            "PUT",
+            "/api/manager/drivers/driver/x",
+            404,
+            "route not found",
+        ),
+        (
+            "PUT",
+            "/api/manager/apps/app/a/setting/",
+            404,
+            "route not found",
+        ),
+        ("PUT", "/api/manager/apps/app/a", 404, "route not found"),
+        ("GET", "/api/nothing", 404, "route not found"),
+        // De eigen 405's van collecties, records en instellingen blijven.
+        (
+            "POST",
+            "/api/manager/devices/device",
+            405,
+            "method not allowed",
+        ),
+        (
+            "POST",
+            "/api/manager/devices/device/d",
+            405,
+            "method not allowed",
+        ),
+        ("PATCH", "/api/stulp/scenes", 405, "method not allowed"),
+        (
+            "POST",
+            "/api/manager/apps/app/a/setting/k",
+            405,
+            "method not allowed",
+        ),
+        (
+            "PUT",
+            "/api/manager/notifications/notification/n",
+            405,
+            "method not allowed",
+        ),
+        // GET dekt HEAD; OPTIONS is altijd 204.
+        ("HEAD", "/api/manager/devices/device", 200, "\"d\""),
+        (
+            "HEAD",
+            "/api/manager/devices/device/d/capability/onoff",
+            200,
+            "",
+        ),
+        (
+            "GET",
+            "/api/manager/apps/app/a/enable",
+            404,
+            "route not found",
+        ),
+        ("GET", "/api/manager/apps/app/a/setting", 200, "{}"),
+        (
+            "GET",
+            "/api/manager/apps/app/a/setting/",
+            404,
+            "route not found",
+        ),
+        (
+            "GET",
+            "/api/manager/devices/device/d/capability/",
+            404,
+            "capability does not exist",
+        ),
+        (
+            "GET",
+            "/api/manager/drivers/driver/",
+            404,
+            "driver does not exist",
+        ),
+        ("GET", "/api/stulp/statistics/d", 404, "route not found"),
+        ("GET", "/api/stulp/attach-token/", 404, "route not found"),
+        ("OPTIONS", "/api/manager/apps/app/a/restart", 204, ""),
+    ];
+    for (method, path, status, body) in cases {
+        let response = web
+            .handle(&mut store, &request(method, path, "{}"), &mut Env)
+            .unwrap();
+        let text = std::str::from_utf8(response.body.bytes()).unwrap();
+        assert_eq!(response.status, *status, "{method} {path}: {text}");
+        assert!(text.contains(body), "{method} {path}: {text}");
+    }
+}

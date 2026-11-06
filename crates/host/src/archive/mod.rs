@@ -472,7 +472,7 @@ pub(crate) async fn download(
     // Deze reeds bestaande HTTP-werker bezit de stream; de controller blijft vrij.
     if let Err(e) = write(document, Sink(exchange)) {
         eprintln!("[stulp:backup-download] {e}");
-        return Err(leanhttp::Error::Connect);
+        return Err(leanhttp::Error::Io(leanhttp::IoError::Other));
     }
     Ok(())
 }

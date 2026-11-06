@@ -1,6 +1,7 @@
 //! Fixed HTTP workers communicate with the single parked controller owner.
 use crate::replies::Sender;
 use alloc::{
+    boxed::Box,
     collections::VecDeque,
     string::{String, ToString},
     vec::Vec,
@@ -10,7 +11,9 @@ use applib::{
     appnet::{TcpListener, TcpStream},
     tcp::TcpConn,
 };
-use core::future::Future;
+use core::future::{Future, poll_fn};
+use core::pin::{Pin, pin};
+use core::task::{Context, Poll};
 use core::time::Duration;
 use hop_sync::{Either, Local, Signal, mpsc::Mailbox, select};
 use stulp_controller::{
@@ -28,6 +31,7 @@ use stulp_core::{
     store::{Storage, Store},
 };
 use stulp_web::{Request, Response, Web};
+macro_rules! log {($($arg:tt)*)=>{applib::log!($($arg)*)}}
 /// At most six long streams leave two workers for interactive requests.
 pub const WORKERS: usize = 8;
 #[allow(clippy::large_enum_variant)]
@@ -65,6 +69,85 @@ const STALE_NS: u64 = 90_000_000_000;
 /// Vanaf deze wachttijd in de rij komt een verbinding op de console, zodat
 /// een volle pool een getal heeft (tot 03-10 telde [stulp:slow] pas vanaf de werker).
 const QUEUE_SLOW_NS: u64 = 1_000_000_000;
+/// Zoveel verse verbindingen mogen in de acceptor wachten op hun eerste
+/// bytes (het park): geen werker, geen taak en geen timer per verbinding
+/// (HopOS docs/apps.md, "Pools, geen taak per verbinding"). Tot 06-11 ging
+/// een verse verbinding meteen naar een werker, die tot 15 s op haar eerste
+/// bytes wachtte (`upload::Prefix::open`); een paar stille voorverbindingen
+/// van een browser legden zo naast de eventstromen de laatste werkers stil.
+/// Is het park vol, dan gaat een verse verbinding de oude weg, naar de rij.
+const PARK: usize = 32;
+/// Zo lang mag een verse verbinding in het park stil zijn (ns, klok van
+/// `EXEC`): dezelfde 15 s die de eerste read van `upload::Prefix::open` een
+/// werker gaf.
+const PARK_NS: u64 = 15_000_000_000;
+/// Een stille verse verbinding in het park, tot `until` (klok van `EXEC`).
+struct Parked {
+    stream: TcpStream,
+    until: u64,
+}
+/// De ene wekker van het park, op de vroegste `until`.
+type Alarm = (u64, Pin<Box<dyn Future<Output = ()>>>);
+/// Kijkt in het park: wie iets zei (bytes, of EOF of een fout, die de werker
+/// meldt zoals altijd) gaat de rij in zolang daar plek is; wie te lang stil
+/// was, gaat dicht. `Ready` zodra er iets verschoof, anders wacht dit op de
+/// stack (`TcpStream::readable` verbruikt niets) en op de ene wekker.
+fn stir(
+    park: &mut Vec<Parked>,
+    alarm: &mut Option<Alarm>,
+    backlog: &mut VecDeque<(TcpStream, u64)>,
+    cx: &mut Context<'_>,
+) -> Poll<()> {
+    let now = EXEC.get().now();
+    let mut moved = false;
+    let mut i = 0;
+    while let Some(p) = park.get_mut(i) {
+        if pin!(p.stream.readable()).poll(cx).is_ready() {
+            // Geen plek in de rij: ze blijft staan, ook voorbij haar
+            // termijn, want ze sprak; een vrije werker wekt de acceptor.
+            if backlog.len() < BACKLOG && backlog.try_reserve(1).is_ok() {
+                let p = park.swap_remove(i);
+                backlog.push_back((p.stream, applib::clock::now_ns()));
+                moved = true;
+            } else {
+                i += 1;
+            }
+        } else if p.until <= now {
+            // Dezelfde regel als toen een werker 15 s op deze bytes wachtte.
+            drop(park.swap_remove(i));
+            log!("[stulp:request-prefix] request prefix unavailable");
+            moved = true;
+        } else {
+            i += 1;
+        }
+    }
+    // Wie over zijn termijn nog staat, sprak al en wacht op plek in de rij;
+    // een wekker in het verleden zou de acceptor dan laten rondtollen.
+    match park
+        .iter()
+        .map(|p| p.until)
+        .filter(|&until| until > now)
+        .min()
+    {
+        None => *alarm = None,
+        Some(at) => {
+            if alarm.as_ref().is_none_or(|(t, _)| *t != at) {
+                *alarm = Some((at, Box::pin(EXEC.get().until(at))));
+            }
+            if let Some((_, a)) = alarm.as_mut()
+                && a.as_mut().poll(cx).is_ready()
+            {
+                *alarm = None;
+                moved = true;
+            }
+        }
+    }
+    if moved {
+        Poll::Ready(())
+    } else {
+        Poll::Pending
+    }
+}
 /// De eerste werker vanaf `next` die in `recv` wacht, round-robin; `next`
 /// schuift voorbij de gekozen werker. Los van de brievenbussen, zodat de
 /// keuze te testen is.
@@ -97,7 +180,6 @@ fn hand_off(stream: TcpStream, since: u64, next: &mut usize) -> Option<TcpStream
     }
     available
 }
-macro_rules! log {($($arg:tt)*)=>{applib::log!($($arg)*)}}
 /// Start a fixed number of workers and a bounded acceptor, once per slot.
 pub fn start_http(
     app: &'static applib::App,
@@ -116,6 +198,8 @@ pub fn start_http(
         .spawn(async move {
             let mut next = 0;
             let mut backlog: VecDeque<(TcpStream, u64)> = VecDeque::new();
+            let mut park: Vec<Parked> = Vec::new();
+            let mut alarm: Option<Alarm> = None;
             loop {
                 // Eerst wie al wacht, in volgorde, zolang er werkers vrij zijn.
                 while let Some((stream, since)) = backlog.pop_front() {
@@ -143,28 +227,41 @@ pub fn start_http(
                 if backlog.len() >= BACKLOG {
                     // Vol: geen nieuwe verbindingen aannemen; die wachten in de
                     // accept-rij van de stack tot hier weer plek is. De tik
-                    // ruimt intussen wat te oud is.
+                    // ruimt intussen wat te oud is. Het park wacht zolang in
+                    // de stack; wie daar sprak, blijft staan tot er plek is.
                     let _ =
                         select(FREED.get().wait(), EXEC.get().after(Duration::from_secs(5))).await;
                     continue;
                 }
                 // Met een wachtrij kijkt de acceptor ook zonder vrije werker
                 // af en toe, zodat te oude verbindingen niet blijven liggen.
-                let accepted = if backlog.is_empty() {
-                    select(listener.accept(), FREED.get().wait()).await
-                } else {
-                    match select(
-                        listener.accept(),
-                        select(FREED.get().wait(), EXEC.get().after(Duration::from_secs(5))),
-                    )
-                    .await
-                    {
-                        Either::Left(r) => Either::Left(r),
-                        Either::Right(_) => Either::Right(()),
+                let queued = !backlog.is_empty();
+                let tick = async {
+                    if queued {
+                        EXEC.get().after(Duration::from_secs(5)).await;
+                    } else {
+                        core::future::pending::<()>().await;
                     }
                 };
+                let stirred = poll_fn(|cx| stir(&mut park, &mut alarm, &mut backlog, cx));
+                let accepted = match select(
+                    listener.accept(),
+                    select(FREED.get().wait(), select(stirred, tick)),
+                )
+                .await
+                {
+                    Either::Left(r) => Some(r),
+                    Either::Right(_) => None,
+                };
                 match accepted {
-                    Either::Left(Ok(stream)) => {
+                    Some(Ok(stream)) => {
+                        // Eerst het park: daar wacht ze op haar eerste bytes
+                        // zonder werker. Vol: de oude weg, de rij in.
+                        if park.len() < PARK && park.try_reserve(1).is_ok() {
+                            let until = EXEC.get().now().saturating_add(PARK_NS);
+                            park.push(Parked { stream, until });
+                            continue;
+                        }
                         let since = applib::clock::now_ns();
                         if let Some(back) = hand_off(stream, since, &mut next)
                             && backlog.try_reserve(1).is_ok()
@@ -172,11 +269,11 @@ pub fn start_http(
                             backlog.push_back((back, since));
                         }
                     }
-                    Either::Left(Err(e)) => {
+                    Some(Err(e)) => {
                         log!("[stulp:http-accept] {e:?}");
                         EXEC.get().after(Duration::from_millis(10)).await;
                     }
-                    Either::Right(()) => (),
+                    None => (),
                 }
             }
         })
@@ -936,8 +1033,20 @@ async fn worker(index: usize, mut dial: crate::network::Dial) {
             },
         )
         .await;
-        if let Err(e) = result {
-            log!("[stulp:connection] {e}");
+        match result {
+            Ok(leanhttp::Outcome::Closed) => (),
+            // Kan niet: elk antwoord zegt `Connection: close`, want een
+            // volgend verzoek op deze verbinding liep niet langs `Prefix`
+            // (een restore boven de grens van leanhttp kreeg dan 413).
+            // Komt er toch een, dan sluit hij hier en houdt niemand hem.
+            Ok(leanhttp::Outcome::Kept(kept)) => kept.close().await,
+            // Geen handler hier neemt de verbinding over; wie het toch doet,
+            // krijgt haar gesloten.
+            Ok(leanhttp::Outcome::Hijacked(hijacked)) => {
+                let mut conn = hijacked.conn;
+                let _ = leanhttp::close(&mut conn).await;
+            }
+            Err(e) => log!("[stulp:connection] {e}"),
         }
     }
 }

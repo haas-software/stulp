@@ -242,10 +242,12 @@ pub trait Environment {
     fn log(&self, _source: &str, _level: &str, _message: &str) {}
 }
 
-/// Bevat geen huisstaat; alleen de browsertoegangsconfiguratie.
+/// Bevat geen huisstaat; alleen de browsertoegangsconfiguratie en de
+/// routetabel van de REST-API.
 pub struct Web {
     token: String,
     proof: String,
+    routes: leanhttp::Mux<api::Route>,
 }
 
 impl Web {
@@ -268,6 +270,7 @@ impl Web {
         Ok(Self {
             token: json::copy(token)?,
             proof,
+            routes: api::routes()?,
         })
     }
 
@@ -341,7 +344,7 @@ impl Web {
         {
             return Ok(asset);
         }
-        match api::dispatch(store, request, env) {
+        match api::dispatch(store, &self.routes, request, env) {
             Ok(response) => Ok(response),
             Err(e) => {
                 let status = match e {

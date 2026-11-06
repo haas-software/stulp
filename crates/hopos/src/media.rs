@@ -58,7 +58,7 @@ pub(crate) async fn pipe(
         }
         total = total.saturating_add(n);
         if mime.starts_with("image/") && total > 4 << 20 {
-            return Err(leanhttp::Error::Connect);
+            return Err(leanhttp::Error::Dial);
         }
         exchange.write(&buffer[..n]).await?;
         exchange.flush().await?;

@@ -425,7 +425,9 @@ async fn tcp(socket: &mut Option<TcpStream>, r: TcpRequest) -> Result<Vec<u8>> {
     if socket.is_none() {
         let (ip, port) = resolve(&r.address).await?;
         *socket = Some(
-            TcpStream::connect(ip, port)
+            // Dezelfde termijn als het hele verzoek (`until` hierboven); applib
+            // kent sinds 3.2.0-rc1 geen dial zonder termijn meer.
+            TcpStream::connect_timeout(ip, port, Duration::from_millis(r.timeout_ms))
                 .await
                 .map_err(|_| Error::Transport("TCP connect failed"))?,
         );

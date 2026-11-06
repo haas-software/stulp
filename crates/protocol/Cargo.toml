@@ -7,8 +7,8 @@ license.workspace = true
 
 [dependencies]
 stulp-core = { path = "../core" }
-leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.1.12" }
-leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.1.12" }
+leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
+leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
 
 [lints]
 workspace = true

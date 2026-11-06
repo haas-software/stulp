@@ -7,15 +7,191 @@ use stulp_core::{
     store::{Storage, Store},
 };
 
+/// Wat de REST-tabel van deze crate bij een verzoek vond; [`dispatch`]
+/// `match`t erop. Paden en methodes staan alleen in [`routes`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Route {
+    /// `GET /api/stulp/attach-token/{id}`.
+    AttachToken,
+    /// `POST /api/stulp/apps/{id}/install`.
+    AppInstall,
+    /// `PUT /api/stulp/devices/{id}/group`.
+    DeviceGroup,
+    /// `PUT /api/manager/flow/flow/{id}/enabled`.
+    FlowEnabled,
+    /// `GET /api/manager/devices/capability`.
+    Capabilities,
+    /// `GET /api/manager/devices/device/{id}/capability/{cap...}`.
+    CapabilityValue,
+    /// `GET /api/stulp/statistics`.
+    Statistics,
+    /// `GET /api/stulp/statistics/{id}/{cap...}`.
+    StatisticsWindow,
+    /// `GET /api/stulp/devices/{id}/media`.
+    DeviceMedia,
+    /// `GET /api/stulp/events`.
+    Events,
+    /// `GET /api/stulp/health`.
+    Health,
+    /// `GET /api/stulp/manage/bootstrap`.
+    Bootstrap,
+    /// `GET /api/manager/devices/device`.
+    Devices,
+    /// `GET /api/manager/apps/app`.
+    Apps,
+    /// `GET /api/manager/drivers/driver`.
+    Drivers,
+    /// `GET /api/manager/system/ping`.
+    Ping,
+    /// `GET /api/manager/system/name`.
+    Name,
+    /// `GET /api/manager/system`.
+    ManagerSystem,
+    /// `GET /api/stulp/system`.
+    System,
+    /// `PUT /api/stulp/system`.
+    SystemUpdate,
+    /// `GET /api/manager/drivers/driver/{id...}`.
+    Driver,
+    /// `/api/manager/apps/app/{rest...}`, elke methode: `GET` leest, de
+    /// rest is van de diensten achter de controller (herstarten, wissen).
+    App,
+    /// `/api/manager/apps/app/{id}/setting/{key...}`, elke methode, met de
+    /// eigen 405 van vóór de Mux.
+    AppSetting,
+    /// `PUT /api/manager/apps/app/{id}/enable` en `.../disable`.
+    AppToggle(bool),
+    /// `POST /api/stulp/log`.
+    Log,
+    /// `PUT /api/stulp/devices/order`.
+    DeviceOrder,
+    /// Een collectie, elke methode, met de eigen 405 van vóór de Mux.
+    Collection(Collection),
+    /// Een record in een collectie (`.../{id}`), idem.
+    Record(Collection),
+}
+
+/// Een collectie achter de REST-API: haar naam in het document en of de
+/// lijst een object op id is (`keyed`) of de waarde zelf.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Collection {
+    name: &'static str,
+    keyed: bool,
+}
+
+/// De collecties: het pad van de lijst, het patroon van een record, de naam
+/// in het document en `keyed`.
+const COLLECTIONS: [(&str, &str, &str, bool); 5] = [
+    (
+        "/api/stulp/device-groups",
+        "/api/stulp/device-groups/{id}",
+        "deviceGroups",
+        false,
+    ),
+    (
+        "/api/stulp/scenes",
+        "/api/stulp/scenes/{id}",
+        "scenes",
+        false,
+    ),
+    (
+        "/api/manager/flow/flow",
+        "/api/manager/flow/flow/{id}",
+        "flows",
+        true,
+    ),
+    (
+        "/api/manager/notifications/notification",
+        "/api/manager/notifications/notification/{id}",
+        "notifications",
+        false,
+    ),
+    (
+        "/api/manager/devices/device",
+        "/api/manager/devices/device/{id}",
+        "devices",
+        true,
+    ),
+];
+
+/// De routetabel, één keer gebouwd in [`super::Web::new`]. Een conflict is
+/// een bedradingsfout en komt daar terug, niet bij een verzoek.
+///
+/// Wat hier niet staat, is niet van deze crate: `OPTIONS` (altijd 204, vóór
+/// de tabel), de statische bestanden (`super::asset`) en wat de controller
+/// na een 404 zelf routeert (koppelen, callbacks, scènes, de kaartcatalogus).
+/// Daarom is een pad dat hier alleen een andere methode kent ook een 404 en
+/// geen 405: de controller kan het voor die methode nog bedienen.
+pub(super) fn routes() -> Result<leanhttp::Mux<Route>> {
+    let mut mux = leanhttp::Mux::new();
+    let table: [(&str, Route); 25] = [
+        ("GET /api/stulp/attach-token/{id}", Route::AttachToken),
+        ("POST /api/stulp/apps/{id}/install", Route::AppInstall),
+        ("PUT /api/stulp/devices/{id}/group", Route::DeviceGroup),
+        (
+            "PUT /api/manager/flow/flow/{id}/enabled",
+            Route::FlowEnabled,
+        ),
+        ("GET /api/manager/devices/capability", Route::Capabilities),
+        (
+            "GET /api/manager/devices/device/{id}/capability/{cap...}",
+            Route::CapabilityValue,
+        ),
+        ("GET /api/stulp/statistics", Route::Statistics),
+        (
+            "GET /api/stulp/statistics/{id}/{cap...}",
+            Route::StatisticsWindow,
+        ),
+        ("GET /api/stulp/devices/{id}/media", Route::DeviceMedia),
+        ("GET /api/stulp/events", Route::Events),
+        ("GET /api/stulp/health", Route::Health),
+        ("GET /api/stulp/manage/bootstrap", Route::Bootstrap),
+        ("GET /api/manager/devices/device", Route::Devices),
+        ("GET /api/manager/apps/app", Route::Apps),
+        ("GET /api/manager/drivers/driver", Route::Drivers),
+        ("GET /api/manager/system/ping", Route::Ping),
+        ("GET /api/manager/system/name", Route::Name),
+        ("GET /api/manager/system", Route::ManagerSystem),
+        ("GET /api/stulp/system", Route::System),
+        ("PUT /api/stulp/system", Route::SystemUpdate),
+        ("GET /api/manager/drivers/driver/{id...}", Route::Driver),
+        ("/api/manager/apps/app/{rest...}", Route::App),
+        (
+            "/api/manager/apps/app/{id}/setting/{key...}",
+            Route::AppSetting,
+        ),
+        ("POST /api/stulp/log", Route::Log),
+        ("PUT /api/stulp/devices/order", Route::DeviceOrder),
+    ];
+    let wire = |e: leanhttp::Error| match e {
+        leanhttp::Error::Alloc { .. } => Error::Memory,
+        _ => Error::Invalid("REST route table"),
+    };
+    for (pattern, route) in table {
+        mux.handle(pattern, route).map_err(wire)?;
+    }
+    for (pattern, on) in [
+        ("PUT /api/manager/apps/app/{id}/enable", true),
+        ("PUT /api/manager/apps/app/{id}/disable", false),
+    ] {
+        mux.handle(pattern, Route::AppToggle(on)).map_err(wire)?;
+    }
+    for (list, record, name, keyed) in COLLECTIONS {
+        let collection = Collection { name, keyed };
+        mux.handle(list, Route::Collection(collection))
+            .map_err(wire)?;
+        mux.handle(record, Route::Record(collection))
+            .map_err(wire)?;
+    }
+    Ok(mux)
+}
+
 pub(super) fn dispatch<S: Storage>(
     store: &mut Store<S>,
+    routes: &leanhttp::Mux<Route>,
     req: &Request,
     env: &mut impl Environment,
 ) -> Result<Response> {
-    if let Some(response) = super::manager::route(store, req, env)? {
-        return Ok(response);
-    }
-    let path = req.path.as_str();
     let method = if req.method == "HEAD" {
         "GET"
     } else {
@@ -24,14 +200,29 @@ pub(super) fn dispatch<S: Storage>(
     if method == "OPTIONS" {
         return Response::json(204, &Value::Null);
     }
-    if method == "GET" {
-        if path == "/api/stulp/statistics" {
-            return Response::json(200, &store.statistics().list()?);
+    // De Mux zoekt op een leanhttp-verzoek; alleen methode en pad tellen.
+    let mut found = leanhttp::Request::default();
+    found.method = json::copy(&req.method)?;
+    found.path = json::copy(&req.path)?;
+    let route = match routes.find(&mut found).map_err(|_| Error::Memory)? {
+        leanhttp::Found::Route(route) => *route,
+        // Ook een andere methode is "niet van ons": zie [`routes`].
+        leanhttp::Found::NotFound | leanhttp::Found::MethodNotAllowed(_) => {
+            return Err(Error::Missing("route not found"));
         }
-        if let Some((id, cap)) = path
-            .strip_prefix("/api/stulp/statistics/")
-            .and_then(|s| s.split_once('/'))
-        {
+    };
+    let value = |name: &str| found.path_value(name).unwrap_or("");
+    let result = match route {
+        Route::AttachToken => return super::manager::attach_token(store, env, value("id")),
+        Route::AppInstall => return super::manager::install(store, env, value("id")),
+        Route::DeviceGroup => return super::manager::group(store, req, env, value("id")),
+        Route::FlowEnabled => return super::manager::flow_enabled(store, req, env, value("id")),
+        Route::Capabilities => return super::manager::capabilities(store),
+        Route::CapabilityValue => {
+            return super::manager::capability_value(store, value("id"), value("cap"));
+        }
+        Route::Statistics => return Response::json(200, &store.statistics().list()?),
+        Route::StatisticsWindow => {
             let window = req
                 .query
                 .split('&')
@@ -39,17 +230,15 @@ pub(super) fn dispatch<S: Storage>(
                 .find(|(k, _)| *k == "window")
                 .map(|(_, v)| v)
                 .unwrap_or("");
-            return Response::json(200, &store.statistics().window(id, cap, window)?);
+            return Response::json(
+                200,
+                &store
+                    .statistics()
+                    .window(value("id"), value("cap"), window)?,
+            );
         }
-
-        if let Some(id) = path
-            .strip_prefix("/api/stulp/devices/")
-            .and_then(|p| p.strip_suffix("/media"))
-            .filter(|id| !id.contains('/'))
-        {
-            return Response::json(200, &store.device_media(id)?);
-        }
-        if path == "/api/stulp/events" {
+        Route::DeviceMedia => return Response::json(200, &store.device_media(value("id"))?),
+        Route::Events => {
             super::query_value(&req.query, "manager")?;
             if !matches!(
                 super::query_value(&req.query, "view")?.as_str(),
@@ -65,57 +254,62 @@ pub(super) fn dispatch<S: Storage>(
                 headers: Vec::new(),
             });
         }
-        let result = match path {
-            "/api/stulp/health" => Some(json::fields(&[
-                ("ok", Value::Bool(true)),
-                ("stulpVersion", json::string(env!("CARGO_PKG_VERSION"))?),
-            ])?),
-            "/api/stulp/manage/bootstrap" => Some(json::fields(&[
-                ("ok", Value::Bool(true)),
-                ("stulpVersion", json::string(env!("CARGO_PKG_VERSION"))?),
-                ("devices", super::views::devices(store, "overview")?),
-                (
-                    "deviceGroups",
-                    copy(json::get(store.document().root(), "deviceGroups"))?,
-                ),
-            ])?),
-            "/api/manager/devices/device" => {
-                let view = super::query_value(&req.query, "view")?;
-                if !matches!(view.as_str(), "" | "overview" | "automation") {
-                    return Response::error(400, "unknown device view");
-                }
-                Some(super::views::devices(store, &view)?)
+        Route::Health => json::fields(&[
+            ("ok", Value::Bool(true)),
+            ("stulpVersion", json::string(env!("CARGO_PKG_VERSION"))?),
+        ])?,
+        Route::Bootstrap => json::fields(&[
+            ("ok", Value::Bool(true)),
+            ("stulpVersion", json::string(env!("CARGO_PKG_VERSION"))?),
+            ("devices", super::views::devices(store, "overview")?),
+            (
+                "deviceGroups",
+                copy(json::get(store.document().root(), "deviceGroups"))?,
+            ),
+        ])?,
+        Route::Devices => {
+            let view = super::query_value(&req.query, "view")?;
+            if !matches!(view.as_str(), "" | "overview" | "automation") {
+                return Response::error(400, "unknown device view");
             }
-            "/api/manager/apps/app" => Some(objects::apps(store)?),
-            "/api/manager/drivers/driver" => Some(objects::drivers(store)?),
-            "/api/manager/system/ping" => Some(Value::Bool(true)),
-            "/api/manager/system/name" => Some(json::string("Stulp")?),
-            "/api/manager/system" => Some(json::fields(&[
-                ("name", json::string("Stulp")?),
-                ("version", json::string(env!("CARGO_PKG_VERSION"))?),
-                ("language", json::string(store.language())?),
-            ])?),
-            "/api/stulp/system" => Some(system(store)?),
-            _ => None,
-        };
-        if let Some(value) = result {
-            return Response::json(200, &value);
+            super::views::devices(store, &view)?
         }
-        if let Some(path) = path.strip_prefix("/api/manager/apps/app/") {
-            return app_read(store, path);
-        }
-        if let Some(id) = path.strip_prefix("/api/manager/drivers/driver/") {
+        Route::Apps => objects::apps(store)?,
+        Route::Drivers => objects::drivers(store)?,
+        Route::Ping => Value::Bool(true),
+        Route::Name => json::string("Stulp")?,
+        Route::ManagerSystem => json::fields(&[
+            ("name", json::string("Stulp")?),
+            ("version", json::string(env!("CARGO_PKG_VERSION"))?),
+            ("language", json::string(store.language())?),
+        ])?,
+        Route::System => system(store)?,
+        Route::Driver => {
             let drivers = objects::drivers(store)?;
             return Response::json(
                 200,
-                json::get(&drivers, id).ok_or(Error::Missing("driver does not exist"))?,
+                json::get(&drivers, value("id")).ok_or(Error::Missing("driver does not exist"))?,
             );
         }
-    }
-    if let Some(path) = path.strip_prefix("/api/manager/apps/app/")
-        && let Some((id, tail)) = path.split_once('/')
-    {
-        if let Some(key) = tail.strip_prefix("setting/").filter(|key| !key.is_empty()) {
+        Route::App => {
+            if method != "GET" {
+                return Err(Error::Missing("route not found"));
+            }
+            return app_read(store, value("rest"));
+        }
+        Route::AppSetting => {
+            let (id, key) = (value("id"), value("key"));
+            if method == "GET" {
+                // Lezen gaat zoals elke andere GET onder deze app.
+                let rest = req
+                    .path
+                    .strip_prefix("/api/manager/apps/app/")
+                    .unwrap_or("");
+                return app_read(store, rest);
+            }
+            if key.is_empty() {
+                return Err(Error::Missing("route not found"));
+            }
             match method {
                 "PUT" => {
                     let body = json::parse(&req.body)?;
@@ -127,102 +321,93 @@ pub(super) fn dispatch<S: Storage>(
                 "DELETE" => store.setting(id, key, None)?,
                 _ => return Response::error(405, "method not allowed"),
             }
-            return Response::json(200, &Value::Bool(true));
+            Value::Bool(true)
         }
-        if method == "PUT" && matches!(tail, "enable" | "disable") {
+        Route::AppToggle(on) => {
+            let id = value("id");
             let mut record = store.document().record("apps", id)?.try_clone()?;
             if json::boolean(&record, "offered") {
                 return Err(Error::Invalid("install the offered app first"));
             }
-            json::set(&mut record, "enabled", Value::Bool(tail == "enable"))?;
+            json::set(&mut record, "enabled", Value::Bool(on))?;
             store.put("apps", record, false, None, &env.now()?)?;
-            return Response::json(200, &Value::Bool(true));
+            Value::Bool(true)
         }
-    }
-    if path == "/api/stulp/log" && method == "POST" {
-        // De iOS-app en de Matter-extensie loggen hierlangs mee op de node:
-        // één regel per stap, zodat een vastgelopen koppeling niet alleen op
-        // de telefoon staat. Begrensd en zonder opslag; alleen de console.
-        let body = json::parse(&req.body)?;
-        let source = json::text(&body, "source").trim();
-        let level = json::text(&body, "level");
-        let message = json::text(&body, "message").trim();
-        if source.is_empty() || source.len() > 64 || source.contains(|c: char| c.is_control()) {
-            return Err(Error::Invalid(
-                "log source must be 1-64 printable characters",
-            ));
+        Route::Log => {
+            log(req, env)?;
+            Value::Bool(true)
         }
-        if !matches!(level, "info" | "warn" | "error") {
-            return Err(Error::Invalid("log level must be info, warn or error"));
-        }
-        if message.is_empty() || message.len() > 1024 {
-            return Err(Error::Invalid("log message must be 1-1024 characters"));
-        }
-        let mut clean = alloc::string::String::new();
-        clean
-            .try_reserve(message.len())
-            .map_err(|_| Error::Memory)?;
-        for c in message.chars() {
-            clean.push(if c.is_control() { ' ' } else { c });
-        }
-        env.log(source, level, &clean);
-        return Response::json(200, &Value::Bool(true));
-    }
-    if path == "/api/stulp/system" && method == "PUT" {
-        let body = json::parse(&req.body)?;
-        let mut system = copy(json::get(store.document().root(), "system"))?;
-        if let Some(value) = json::get(&body, "statistics") {
-            if value.as_bool().is_none() {
-                return Err(Error::Invalid("statistics must be boolean"));
+        Route::SystemUpdate => {
+            let body = json::parse(&req.body)?;
+            let mut system = copy(json::get(store.document().root(), "system"))?;
+            if let Some(value) = json::get(&body, "statistics") {
+                if value.as_bool().is_none() {
+                    return Err(Error::Invalid("statistics must be boolean"));
+                }
+                json::set(&mut system, "statistics", value.try_clone()?)?;
             }
-            json::set(&mut system, "statistics", value.try_clone()?)?;
+            if let Some(patch) = json::get(&body, "units") {
+                let mut units = match json::get(&system, "units") {
+                    Some(value) => value.try_clone()?,
+                    None => json::object(),
+                };
+                stulp_core::units::update(&mut units, patch)?;
+                json::set(&mut system, "units", units)?;
+            }
+            store.system(system)?;
+            self::system(store)?
         }
-        if let Some(patch) = json::get(&body, "units") {
-            let mut units = match json::get(&system, "units") {
-                Some(value) => value.try_clone()?,
-                None => json::object(),
-            };
-            stulp_core::units::update(&mut units, patch)?;
-            json::set(&mut system, "units", units)?;
+        Route::DeviceOrder => {
+            let body = json::parse(&req.body)?;
+            let mut ids = Vec::new();
+            for id in json::array(&body, "deviceIds") {
+                json::push(
+                    &mut ids,
+                    id.as_str().ok_or(Error::Invalid("invalid device id"))?,
+                    4096,
+                )?;
+            }
+            store.reorder_devices(json::text(&body, "groupId"), &ids)?;
+            Value::Bool(true)
         }
-        store.system(system)?;
-        return Response::json(200, &self::system(store)?);
+        Route::Collection(c) => {
+            return collection_request(store, c.name, c.keyed, method, req, env);
+        }
+        Route::Record(c) => {
+            return record_request(store, c.name, value("id"), method, req, env);
+        }
+    };
+    Response::json(200, &result)
+}
+
+/// `POST /api/stulp/log`: de iOS-app en de Matter-extensie loggen hierlangs
+/// mee op de node, één regel per stap, zodat een vastgelopen koppeling niet
+/// alleen op de telefoon staat. Begrensd en zonder opslag; alleen de console.
+fn log(req: &Request, env: &mut impl Environment) -> Result {
+    let body = json::parse(&req.body)?;
+    let source = json::text(&body, "source").trim();
+    let level = json::text(&body, "level");
+    let message = json::text(&body, "message").trim();
+    if source.is_empty() || source.len() > 64 || source.contains(|c: char| c.is_control()) {
+        return Err(Error::Invalid(
+            "log source must be 1-64 printable characters",
+        ));
     }
-    if path == "/api/stulp/devices/order" && method == "PUT" {
-        let body = json::parse(&req.body)?;
-        let mut ids = Vec::new();
-        for id in json::array(&body, "deviceIds") {
-            json::push(
-                &mut ids,
-                id.as_str().ok_or(Error::Invalid("invalid device id"))?,
-                4096,
-            )?;
-        }
-        store.reorder_devices(json::text(&body, "groupId"), &ids)?;
-        return Response::json(200, &Value::Bool(true));
+    if !matches!(level, "info" | "warn" | "error") {
+        return Err(Error::Invalid("log level must be info, warn or error"));
     }
-    for (prefix, collection, keyed) in [
-        ("/api/stulp/device-groups", "deviceGroups", false),
-        ("/api/stulp/scenes", "scenes", false),
-        ("/api/manager/flow/flow", "flows", true),
-        (
-            "/api/manager/notifications/notification",
-            "notifications",
-            false,
-        ),
-        ("/api/manager/devices/device", "devices", true),
-    ] {
-        if path == prefix {
-            return collection_request(store, collection, keyed, method, req, env);
-        }
-        if let Some(id) = path.strip_prefix(prefix).and_then(|p| p.strip_prefix('/'))
-            && !id.is_empty()
-            && !id.contains('/')
-        {
-            return record_request(store, collection, id, method, req, env);
-        }
+    if message.is_empty() || message.len() > 1024 {
+        return Err(Error::Invalid("log message must be 1-1024 characters"));
     }
-    Err(Error::Missing("route not found"))
+    let mut clean = alloc::string::String::new();
+    clean
+        .try_reserve(message.len())
+        .map_err(|_| Error::Memory)?;
+    for c in message.chars() {
+        clean.push(if c.is_control() { ' ' } else { c });
+    }
+    env.log(source, level, &clean);
+    Ok(())
 }
 
 fn system<S: Storage>(store: &Store<S>) -> Result<Value> {
