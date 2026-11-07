@@ -6,9 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-leanhttp = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
-leanhttps = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
-leantls = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2", features = ["mozilla-roots"] }
+leanhttp = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leanhttps = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leantls = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3", features = ["mozilla-roots"] }
 
 [lints]
 workspace = true

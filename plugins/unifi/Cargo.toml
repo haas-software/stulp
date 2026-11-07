@@ -9,8 +9,8 @@ license.workspace = true
 stulp-protocol = { path = "../../crates/protocol" }
 stulp-sdk = { path = "../../crates/sdk" }
 stulp-core = { path = "../../crates/core" }
-leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
-leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc2" }
+leanbase64 = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
 stulp-plugin-host = { path = "../../crates/plugin-host", optional = true }
 
 [lints]
