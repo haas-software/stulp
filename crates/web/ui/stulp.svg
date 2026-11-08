@@ -1,20 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 66" role="img" aria-labelledby="title">
-  <title id="title">Stulp-tulp</title>
-  <defs>
-    <linearGradient id="red" x1="0" y1="0" x2="0.55" y2="1">
-      <stop offset="0" stop-color="#ff3b2f"/>
-      <stop offset="1" stop-color="#ff271d"/>
-    </linearGradient>
-    <mask id="petal-cuts" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">
-      <rect width="64" height="66" fill="#fff"/>
-      <path d="M23.5 20c-3.2 7.8-2.8 18.8 1.2 26.1 1.2 2.3 1.2 4.2 2.3 5.8" fill="none" stroke="#000" stroke-linecap="round" stroke-width="1.45"/>
-      <path d="M40.5 20c3.2 7.8 2.8 18.8-1.2 26.1-1.2 2.3-1.2 4.2-2.3 5.8" fill="none" stroke="#000" stroke-linecap="round" stroke-width="1.45"/>
-    </mask>
-  </defs>
-  <g mask="url(#petal-cuts)">
-    <path fill="url(#red)" d="M7 12.4c6.8.6 12.8 3.5 16.4 8-2.2 5.8-3.4 12-3.4 17.8 0 6.6 2.3 11.5 6.4 14.2C14 49 7 39.6 7 23.8V12.4Z"/>
-    <path fill="url(#red)" d="M32 7c-8.3 8.4-13 20-13 32.2 0 8.5 4.9 13.6 13 13.6s13-5.1 13-13.6C45 27 40.3 15.4 32 7Z"/>
-    <path fill="url(#red)" d="M57 12.4c-6.8.6-12.8 3.5-16.4 8 2.2 5.8 3.4 12 3.4 17.8 0 6.6-2.3 11.5-6.4 14.2C50 49 57 39.6 57 23.8V12.4Z"/>
-  </g>
-  <rect width="4.7" height="5.8" x="29.65" y="54.3" fill="url(#red)" rx="0.8"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="home-title home-desc">
+<title id="home-title">Stulp — Huis met zwevende stapellagen</title>
+<desc id="home-desc">Neonroze pictogram met paarse stapellagen en zachte contactschaduwen op een bijna zwarte afgeronde tegel. Volledig uit vectorvormen opgebouwd.</desc>
+<defs>
+<linearGradient id="home-pink" gradientUnits="userSpaceOnUse" x1="300" y1="260" x2="950" y2="850"><stop offset="0" stop-color="#ff009b"/><stop offset="0.53" stop-color="#ff009d"/><stop offset="1" stop-color="#fc00bc"/></linearGradient>
+<linearGradient id="home-violet" gradientUnits="userSpaceOnUse" x1="250" y1="650" x2="860" y2="1000"><stop offset="0" stop-color="#9500ed"/><stop offset="0.55" stop-color="#7900f5"/><stop offset="1" stop-color="#6000ff"/></linearGradient>
+<linearGradient id="home-magenta" gradientUnits="userSpaceOnUse" x1="250" y1="650" x2="920" y2="950"><stop offset="0" stop-color="#df00f5"/><stop offset="0.5" stop-color="#df00fb"/><stop offset="1" stop-color="#b300ff"/></linearGradient>
+<filter id="home-soft" x="0" y="0" width="1254" height="1254" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="25"/></filter>
+<filter id="home-wide" x="0" y="0" width="1254" height="1254" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="35"/></filter>
+<filter id="home-tight" x="0" y="0" width="1254" height="1254" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="15"/></filter>
+<linearGradient id="home-house-pink" gradientUnits="userSpaceOnUse" x1="627" y1="240" x2="627" y2="823"><stop offset="0" stop-color="#ff00a8"/><stop offset="1" stop-color="#ff00bc"/></linearGradient>
+<clipPath id="home-clip-7"><path d="M584 726 Q625 708 669 726 L924 850 C980 874 981 932 927 956 L669 1052 Q626 1071 583 1052 L322 956 C266 933 264 875 317 850 Z" fill="url(#home-violet)" /></clipPath>
+<clipPath id="home-clip-8"><path d="M583 559 Q626 540 671 559 L949 727 C1010 760 1013 820 952 848 L671 953 Q627 972 583 953 L300 848 C241 821 243 762 301 728 Z" fill="url(#home-magenta)" /></clipPath>
+</defs>
+<g id="home-background">
+
+<rect x="19" y="19" width="1216" height="1216" rx="320" fill="#010011" id="home-tile"/>
+</g>
+<g id="home-lower-platform">
+<path d="M584 726 Q625 708 669 726 L924 850 C980 874 981 932 927 956 L669 1052 Q626 1071 583 1052 L322 956 C266 933 264 875 317 850 Z" fill="url(#home-violet)" />
+<g clip-path="url(#home-clip-7)"><g transform="translate(0 40)" filter="url(#home-wide)" opacity="0.97"><path d="M583 559 Q626 540 671 559 L949 727 C1010 760 1013 820 952 848 L671 953 Q627 972 583 953 L300 848 C241 821 243 762 301 728 Z" fill="#070016" /></g></g>
+</g>
+<g id="home-upper-platform">
+<path d="M583 559 Q626 540 671 559 L949 727 C1010 760 1013 820 952 848 L671 953 Q627 972 583 953 L300 848 C241 821 243 762 301 728 Z" fill="url(#home-magenta)" />
+<g clip-path="url(#home-clip-8)"><g transform="translate(0 43)" filter="url(#home-wide)" opacity="0.98"><path d="M576 258 C607 232 644 232 675 258 L916 458 C932 472 947 485 947 502 C947 530 917 549 894 532 V728 C894 781 852 823 799 823 H452 C399 823 359 781 359 728 V532 C333 549 305 529 305 502 C305 484 321 470 339 453 Z" fill="#070016" /></g></g>
+</g>
+<g id="home-house">
+<path d="M576 258 C607 232 644 232 675 258 L916 458 C932 472 947 485 947 502 C947 530 917 549 894 532 V728 C894 781 852 823 799 823 H452 C399 823 359 781 359 728 V532 C333 549 305 529 305 502 C305 484 321 470 339 453 Z" fill="#010011" />
+<path d="M576 258 C607 232 644 232 675 258 L916 458 C932 472 947 485 947 502 C947 530 917 549 894 532 V728 C894 781 852 823 799 823 H452 C399 823 359 781 359 728 V532 C333 549 305 529 305 502 C305 484 321 470 339 453 Z M646 318 Q626 301 606 318 L424 470 Q418 474 418 482 V721 C418 744 435 760 457 760 H795 C818 760 835 744 835 721 V482 Q835 474 830 470 Z" fill="url(#home-house-pink)" fill-rule="evenodd"/>
+</g>
 </svg>
