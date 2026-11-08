@@ -11,6 +11,25 @@ pub(super) fn validate(doc: &Document, group: &mut Value) -> Result {
     let name = json::copy(json::text(group, "name").trim())?;
     let parent = json::copy(json::text(group, "parentId").trim())?;
     json::set(group, "parentId", json::string(&parent)?)?;
+    // A location's icon is an SF Symbol name the app draws ("sofa.fill", "1.square.fill").
+    // Stulp never draws it, so it only bounds it; an empty icon means "none".
+    let mut drop_icon = false;
+    if let Some(icon) = json::get(group, "icon") {
+        let text = icon
+            .as_str()
+            .ok_or(Error::Invalid("group icon must be text"))?;
+        if text.len() > 64
+            || !text
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.')
+        {
+            return Err(Error::Invalid("group icon must be a symbol name"));
+        }
+        drop_icon = text.is_empty();
+    }
+    if drop_icon {
+        json::remove(group, "icon")?;
+    }
     let id = json::text(group, "id");
     if name.is_empty() || name.len() > 80 {
         return Err(Error::Invalid("group name must contain 1 to 80 bytes"));

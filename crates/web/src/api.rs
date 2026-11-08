@@ -551,7 +551,7 @@ fn record_request<S: Storage>(
             let mut record = store.document().record(collection, id)?.try_clone()?;
             let fields: &[&str] = match collection {
                 "devices" => &["name", "groupId"],
-                "deviceGroups" => &["name", "parentId", "sortOrder"],
+                "deviceGroups" => &["name", "parentId", "sortOrder", "icon"],
                 "flows" => &["name", "enabled", "nodes", "edges"],
                 "scenes" => &["name", "kind", "states"],
                 _ => &[],

@@ -377,6 +377,29 @@ fn management_routes_preserve_metadata_and_capability_value_contract() {
         )
         .unwrap();
     assert_eq!(answer.status, 201);
+    // A location keeps the icon the app chose; anything but a symbol name is refused, and an
+    // empty icon removes it.
+    for (body, status, icon) in [
+        (r#"{"icon":"1.square.fill"}"#, 200, Some("1.square.fill")),
+        (r#"{"icon":"<b>"}"#, 400, Some("1.square.fill")),
+        (r#"{"icon":7}"#, 400, Some("1.square.fill")),
+        (r#"{"icon":""}"#, 200, None),
+    ] {
+        let answer = web
+            .handle(
+                &mut s,
+                &request("PUT", "/api/stulp/device-groups/generated", body),
+                &mut Env,
+            )
+            .unwrap();
+        assert_eq!(answer.status, status, "{body}");
+        let group = s.document().record("deviceGroups", "generated").unwrap();
+        assert_eq!(
+            json::get(group, "icon").and_then(|v| v.as_str()),
+            icon,
+            "{body}"
+        );
+    }
     assert_eq!(
         web.handle(
             &mut s,
