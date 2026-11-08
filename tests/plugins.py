@@ -3,7 +3,7 @@
 import base64
 import hashlib
 import hmac
-import http.cookiejar
+import http.client
 import json
 import os
 from pathlib import Path
@@ -33,7 +33,8 @@ class Chain:
         self.logs = tempfile.TemporaryFile()
         self.scheme = "https" if tls else "http"
         self.ssl = ssl.create_default_context(cafile=str(tls / "cert.pem")) if tls else None
-        self.http = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), urllib.request.HTTPSHandler(context=self.ssl))
+        self.http = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self.ssl))
+        self.http.addheaders = [("Authorization", "Bearer integration-key")]
         self.server = self.spawn([str(BIN / "stulp-host"), "--document", str(document), "serve", "--listen", "127.0.0.1:0", "--token", "integration-key", "--attach-port", "127.0.0.1:0", "--log-level", log_level] + (["--tls-cert", str(tls / "cert.pem"), "--tls-key", str(tls / "key.pem")] if tls else ["--attach-plaintext"]) + (["--attach", str(unix)] if unix else []))
         self.address = self.server.stdout.readline().decode().strip().split("://", 1)[1]
         attach = self.server.stdout.readline().decode().strip().split("://", 1)[1]
@@ -41,7 +42,6 @@ class Chain:
         self.attach = attach
         if unix:
             assert self.server.stdout.readline().decode().strip().endswith("unix://" + str(unix))
-        self.get("/integration-key")
         token = base64.urlsafe_b64encode(hmac.new(b"integration-secret", b"token\0" + app.encode() + b"\0", hashlib.sha256).digest()).decode().rstrip("=")
         env = dict(os.environ, STULP_ATTACH=attach, STULP_ATTACH_TOKEN=token, STULP_ATTACH_PLAINTEXT="1")
         env.pop("STULP_ATTACH_CA", None)
@@ -351,12 +351,9 @@ class Plugins(unittest.TestCase):
                 self.assertEqual(new_root.parent,Path(str(path)+".apps").resolve())
                 chain.set(True)
                 # Dezelfde grote backup met HTTP chunked framing.
-                cookie=urllib.request.Request(chain.base+"/")
-                for handler in chain.http.handlers:
-                    if isinstance(handler,urllib.request.HTTPCookieProcessor): handler.cookiejar.add_cookie_header(cookie)
                 connection=http.client.HTTPSConnection(chain.address,context=chain.ssl,timeout=30) if tls else http.client.HTTPConnection(chain.address,timeout=20)
                 try:
-                    connection.request("POST","/api/stulp/restore",body=(archive[i:i+8192] for i in range(0,len(archive),8192)),headers={"Content-Type":"application/zip","Cookie":cookie.get_header("Cookie")},encode_chunked=True)
+                    connection.request("POST","/api/stulp/restore",body=(archive[i:i+8192] for i in range(0,len(archive),8192)),headers={"Content-Type":"application/zip","Authorization":"Bearer integration-key"},encode_chunked=True)
                     response=connection.getresponse()
                     self.assertEqual(response.status,200,response.read() if response.status!=200 else None)
                     self.assertTrue(json.loads(response.read())["restored"])
@@ -628,6 +625,16 @@ class Plugins(unittest.TestCase):
                     urllib.request.urlopen(chain.base + "/app-ui/" + app + "/settings/", timeout=5)
                 self.assertEqual(denied.exception.code, 404)
                 denied.exception.close()
+                # The app loads its pages with the session cookie it derives from the key;
+                # that cookie opens /app-ui/ and nothing under /api/.
+                proof = hashlib.sha256(b"stulp web session\0integration-key").hexdigest()
+                page = urllib.request.Request(chain.base + "/app-ui/" + app + "/settings/", headers={"Cookie": "stulp-session=" + proof})
+                with urllib.request.urlopen(page, timeout=5) as response:
+                    self.assertIn(b"stulp.js", response.read())
+                with self.assertRaises(urllib.error.HTTPError) as api:
+                    urllib.request.urlopen(urllib.request.Request(chain.base + "/api/stulp/health", headers={"Cookie": "stulp-session=" + proof}), timeout=5)
+                self.assertEqual(api.exception.code, 401)
+                api.exception.close()
                 with self.assertRaises(urllib.error.HTTPError) as invalid:
                     chain.get("/app-ui/" + app + "/settings/../app.json")
                 invalid.exception.close()

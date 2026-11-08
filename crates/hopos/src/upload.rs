@@ -274,7 +274,10 @@ impl Prefix {
             host: json::copy(&request.host)?,
             origin: json::copy(&request.origin)?,
             cookie: json::copy(&request.cookie)?,
-            headers: json::object(),
+            headers: json::fields(&[(
+                "authorization",
+                json::string(json::text(&request.headers, "authorization"))?,
+            )])?,
             body: Vec::new(),
         };
         WORK.try_send(Work::AuthorizeRestore(Call {

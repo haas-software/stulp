@@ -497,7 +497,6 @@ pub fn run<S: Storage>(
                 status: 200,
                 content_type: "text/event-stream",
                 body: stulp_web::Body::Owned(body),
-                cookie: None,
                 headers: Vec::new(),
             };
             match s.reply.send(response) {
@@ -950,6 +949,7 @@ async fn worker(index: usize, mut dial: crate::network::Dial) {
                     ("Content-Type", "content-type"),
                     ("Accept", "accept"),
                     ("MCP-Protocol-Version", "mcp-protocol-version"),
+                    ("Authorization", "authorization"),
                     ("If-None-Match", "if-none-match"),
                 ] {
                     json::set(
@@ -998,9 +998,6 @@ async fn worker(index: usize, mut dial: crate::network::Dial) {
                 header.set("Referrer-Policy", "no-referrer")?;
                 header.set("X-Content-Type-Options", "nosniff")?;
                 header.set("X-Stulp-Version", env!("CARGO_PKG_VERSION"))?;
-                if let Some(cookie) = response.cookie {
-                    header.set("Set-Cookie", &cookie)?;
-                }
                 for (name, value) in &response.headers {
                     header.set(name, value)?;
                 }

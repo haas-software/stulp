@@ -40,10 +40,14 @@ STULP_TOKEN=local-development-key target/release/stulp-host \
   --document /tmp/stulp-rust-development.json serve --listen 127.0.0.1:8080
 ```
 
-Open `http://127.0.0.1:8080/local-development-key`. Original HTML, JavaScript, CSS,
-PWA and plugin UI assets are embedded. The existing HttpOnly browser session and
-same-origin write checks protect the API. `check`, `apps` and `devices` CLI
-commands also accept `--document`; without it the default is `stulp.json`.
+There is no web interface: the native Stulp app (and `curl`) call the API with
+`Authorization: Bearer local-development-key`. Embedded are only `/stulp.js` and
+`/assets/app-frame.css`, which app-owned settings and pair pages load. Those pages
+are served under `/app-ui/`, where the app authenticates with a `stulp-session`
+cookie it derives from the key; that cookie opens nothing under `/api/`.
+Same-origin write checks still apply to any request that carries an `Origin`.
+`check`, `apps` and `devices` CLI commands also accept `--document`; without it
+the default is `stulp.json`.
 
 The host supervises installed local bundles and connects them through a private
 0700 directory and 0600 Unix socket. `serve --attach SOCKET` also accepts externally
@@ -71,7 +75,7 @@ CLI commands include `check`, `apps`, `devices`, `install`, `uninstall`,
 arguments. Explicit CLI execution may run a disabled app once without changing its
 saved enabled state. The document lock excludes a second writer while a command is active.
 
-## Controller and browser integration
+## Controller and API integration
 
 One controller task owns the document, live observations, app connections,
 pair sessions, Flow runs and media tickets. Eight fixed HTTP workers exchange
@@ -84,17 +88,17 @@ SSE/media retained); large restore uploads have a separate bounded framing parse
 - Authenticated app snapshots, initialization, owned mutations, heartbeat,
   bounded callbacks, disconnect cancellation and state pushes work over real
   loopback connections. A lagging app reconnects for an authoritative snapshot.
-- Browser pairing starts/emits/closes sessions and adopts candidates with driver
+- API pairing starts/emits/closes sessions and adopts candidates with driver
   defaults. The device snapshot precedes initialization. An init failure rolls
   back the stored device; the plugin connection remains usable. Duplicate
   candidate retries reuse an existing device, while an adoption still in progress
   returns conflict. Removing a device first invokes the plugin for external
   cleanup; an offline plugin cannot prevent local deletion.
-- Browser device settings invoke a bounded plugin callback before the controller
+- Device settings invoke a bounded plugin callback before the controller
   merges the patch into the latest device record. Unchanged patches cause no
   device command. Concurrent settings/unpair operations are rejected; unrelated
   renames survive. WiiM addresses and Sigenergy unit IDs are validated; UniFi
-  camera microphone writes return failures to the browser without blind retries;
+  camera microphone writes return failures to the client without blind retries;
   Matter runs its validated attribute writes. Physical writes cannot be rolled
   back atomically with document storage; Matter retains individually confirmed
   setting writes if a later network operation fails.
@@ -117,8 +121,8 @@ SSE/media retained); large restore uploads have a separate bounded framing parse
   and SSE admission retain two HTTP workers for ordinary requests.
 - Notify image choices use the live image registry. Shared image URLs retain only
   a resolver, expire after 15 minutes and are never persisted. Eight tickets may
-  wait; oldest tickets are evicted. A valid ticket can be fetched without a
-  browser cookie, and only that fetch requests a fresh snapshot from the plugin.
+  wait; oldest tickets are evicted. A valid ticket can be fetched without the
+  bearer key, and only that fetch requests a fresh snapshot from the plugin.
 
 - Local child supervision covers startup, observed exit, bounded restart delay,
   enable/disable, offers, install/restart/uninstall and confirmed termination
@@ -137,11 +141,11 @@ SSE/media retained); large restore uploads have a separate bounded framing parse
 - Optional statistics use three fixed rings per capability. MCP exposes the
   original 17 tools with actual device/Flow/scene callbacks, authentication,
   Origin checks, input/output limits, admission limits and timeouts.
-- Manage bootstrap and overview/SSE use compact tile metadata. Automation views
+- The bootstrap snapshot and overview/SSE use compact tile metadata. Automation views
   carry all capabilities without private settings/data. SSE supports manager
   filters while retaining reload markers. Plugin HTML gets its locale with English
   fallback, escaped before script injection.
-- CLI and browser ZIP backup/restore include local app bundles and private state.
+- CLI and API ZIP backup/restore include local app bundles and private state.
   Go-produced deflated archives and Rust-produced stored archives interoperate.
   Restore validates paths, file types, ownership, manifests and CRCs in private
   staging before stopping children, publishing state and restarting installed apps.
@@ -149,7 +153,7 @@ SSE/media retained); large restore uploads have a separate bounded framing parse
   Configuration-only app entries reuse matching installed local bundles, keeping
   the imported settings and enabled state. Bundles supplied by the archive retain
   precedence; paths inside a replaced bundle tree are never reused.
-  Browser uploads stream up to 512 MiB, including chunked bodies, without loading
+  Uploads stream up to 512 MiB, including chunked bodies, without loading
   the entire archive into RAM. ZIP expansion is limited to 2 GiB / 100,000 entries.
 
 Only configuration, explicit persistent plugin state and Flow history cause disk
@@ -160,7 +164,7 @@ markers/settings only when they actually change.
 
 | Plugin | Rust implementation and validation |
 | --- | --- |
-| Virtual devices | Persistent switches, isolated pairing sessions; real browser-API create/control/dedup/close and restart tests. |
+| Virtual devices | Persistent switches, isolated pairing sessions; real API create/control/dedup/close and restart tests. |
 | Weather | Open-Meteo search/forecasts, canonical units, conditions and threshold events; midnight, WMO and threshold tests. |
 | Somfy | Private account/cookie sessions, seven covering drivers, execution cancellation and scenarios; auth refresh, heartbeat, command/storage failure and actual UI/API proxy tests. |
 | Nibe | PKCE/machine login, token rotation, S/F parameter maps, capabilities, polling and energy splitting; OAuth, state and persistence tests. |
@@ -302,7 +306,7 @@ allowing the controller to proxy a plugin running in a separate slot.
 executables under `target/<target>/release` for ARM64 and RISC-V, and packages
 them into `out/` under the names the nodes' startup files use. Hop starts each
 plugin as an external slot; the controller does not fork native bundles. Both
-platforms use the same Flow, scene, pairing, catalog, MCP and browser UI services.
+platforms use the same Flow, scene, pairing, catalog, MCP and app-page services.
 
 `stulp-all-plugins-hopos` combines all ten plugins into one image, as the old
 `all-plugins-*-tamago.elf` did. It shares one network and executor, with separate

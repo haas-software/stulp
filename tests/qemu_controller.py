@@ -9,7 +9,6 @@ import base64
 import hmac
 import io
 import zipfile
-import http.cookiejar
 import http.client
 import hashlib
 import http.server
@@ -37,15 +36,14 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         pass
 
 def exercise(port,boot,start_plugin):
-    cookies=http.cookiejar.CookieJar()
-    browser=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+    browser=urllib.request.build_opener()
+    browser.addheaders=[('Authorization','Bearer qemu-key')]
     base=f'http://127.0.0.1:{port}'
     def call(method,path,body=None,kind='application/json'):
         raw=body if isinstance(body,bytes) else None if body is None else json.dumps(body).encode()
         req=urllib.request.Request(base+path,data=raw,headers={'Content-Type':kind},method=method)
         with browser.open(req,timeout=30) as response:return response.read()
-    page=call('GET','/qemu-key')
-    assert b'<!DOCTYPE html>' in page or b'<!doctype html>' in page,page[:100]
+    assert json.loads(call('GET','/api/stulp/health'))['ok']
     if boot==0:
         group=json.loads(call('POST','/api/stulp/device-groups',{'name':'QEMU persistent room'}))
         assert group['name']=='QEMU persistent room',group
@@ -68,7 +66,7 @@ def exercise(port,boot,start_plugin):
         assert result['restored'],result
         connection=http.client.HTTPConnection('127.0.0.1',port,timeout=30)
         payload=data.getvalue()
-        connection.request('POST','/api/stulp/restore',body=(payload[i:i+65536] for i in range(0,len(payload),65536)),headers={'Content-Type':'application/zip','Transfer-Encoding':'chunked','Cookie':'; '.join(c.name+'='+c.value for c in cookies)},encode_chunked=True)
+        connection.request('POST','/api/stulp/restore',body=(payload[i:i+65536] for i in range(0,len(payload),65536)),headers={'Content-Type':'application/zip','Transfer-Encoding':'chunked','Authorization':'Bearer qemu-key'},encode_chunked=True)
         response=connection.getresponse();value=response.read();assert response.status==200,value
         assert json.loads(value)['restored'];connection.close()
         try:call('POST','/api/stulp/restore',b'broken ZIP','application/zip')

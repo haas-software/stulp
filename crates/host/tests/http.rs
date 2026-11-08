@@ -52,11 +52,12 @@ impl Server {
             attach,
         }
     }
-    fn request(&self, method: &str, path: &str, cookie: &str, body: &str) -> (u16, String, String) {
+    /// `auth` is one whole header line (`Authorization: Bearer …`, `Cookie: …`) or empty.
+    fn request(&self, method: &str, path: &str, auth: &str, body: &str) -> (u16, String, String) {
         let mut conn = TcpStream::connect(&self.address).unwrap();
         conn.set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .unwrap();
-        write!(conn,"{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",self.address,body.len()).unwrap();
+        write!(conn,"{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n{auth}{}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",self.address,if auth.is_empty() { "" } else { "\r\n" },body.len()).unwrap();
         let mut bytes = Vec::new();
         conn.read_to_end(&mut bytes).unwrap();
         let answer = String::from_utf8(bytes).unwrap();
@@ -64,18 +65,8 @@ impl Server {
         let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
         (status, headers.to_string(), body.to_string())
     }
-    fn cookie(&self) -> String {
-        let (status, headers, body) = self.request("GET", "/test-key", "", "");
-        assert_eq!(status, 200);
-        assert!(body.contains("<!DOCTYPE html>") || body.contains("<!doctype html>"));
-        headers
-            .lines()
-            .find_map(|line| line.strip_prefix("Set-Cookie: "))
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .to_string()
+    fn auth(&self) -> String {
+        "Authorization: Bearer test-key".to_string()
     }
 }
 impl Drop for Server {
@@ -211,7 +202,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     let path = temp.0.join("document.json");
     std::fs::write(&path,br#"{"version":2,"apps":[{"id":"test.app","enabled":true}],"devices":[{"id":"lamp","appId":"test.app","driverId":"lamp","name":"Test lamp","data":{},"capabilities":["onoff"]}],"system":{"attachSecret":"test-secret"}}"#).unwrap();
     let server = Server::start(&path);
-    let cookie = server.cookie();
+    let auth = server.auth();
     let mut stream = TcpStream::connect(&server.attach).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
@@ -273,7 +264,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     let ack = read_frame(&mut stream);
     assert_eq!(json::text(&ack, "t"), "res");
     assert_eq!(json::uint(&ack, "id"), 2);
-    let (status, _, body) = server.request("GET", "/api/manager/devices/device/lamp", &cookie, "");
+    let (status, _, body) = server.request("GET", "/api/manager/devices/device/lamp", &auth, "");
     assert_eq!(status, 200);
     assert!(body.contains("\"value\":true"));
     assert!(
@@ -286,7 +277,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
             server.request(
                 "PUT",
                 "/api/manager/devices/device/lamp/capability/onoff",
-                &cookie,
+                &auth,
                 r#"{"value":false}"#,
             )
         });
@@ -306,14 +297,14 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
         assert_eq!(http.join().unwrap().0, 200);
     });
     // De bestaande Test-knop moet werkelijk de app aanroepen en historie opslaan.
-    let (status, _, body) = server.request("POST", "/api/manager/flow/flow", &cookie,
+    let (status, _, body) = server.request("POST", "/api/manager/flow/flow", &auth,
         r#"{"name":"Callback flow","enabled":false,"nodes":[{"id":"t","step":{"appId":"stulp","cardType":"trigger","cardId":"time_at"}},{"id":"a","step":{"appId":"test.app","cardType":"action","cardId":"send","args":{"message":"hello"}}}],"edges":[{"from":"t","to":"a"}]}"#);
     assert_eq!(status, 201, "{body}");
     let definition = json::parse(body.as_bytes()).unwrap();
     let id = json::text(&definition, "id");
     std::thread::scope(|scope| {
         let http = scope
-            .spawn(|| server.request("POST", &format!("/api/stulp/flows/{id}/run"), &cookie, ""));
+            .spawn(|| server.request("POST", &format!("/api/stulp/flows/{id}/run"), &auth, ""));
         let call = read_frame(&mut stream);
         assert_eq!(json::text(&call, "m"), "flow.run");
         let params = json::get(&call, "p").unwrap();
@@ -322,7 +313,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
         // HTTP blijft werken terwijl de Flow op zijn app wacht.
         assert_eq!(
             server
-                .request("GET", "/api/stulp/manage/bootstrap", &cookie, "")
+                .request("GET", "/api/stulp/manage/bootstrap", &auth, "")
                 .0,
             200
         );
@@ -341,7 +332,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
             .request(
                 "PUT",
                 "/api/manager/apps/app/test.app/setting/theme",
-                &cookie,
+                &auth,
                 r#"{"value":"dark"}"#
             )
             .0,
@@ -355,11 +346,11 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     );
     assert_eq!(
         server
-            .request("GET", "/api/manager/apps/app/test.app", &cookie, "")
+            .request("GET", "/api/manager/apps/app/test.app", &auth, "")
             .0,
         200
     );
-    let (status, _, drivers) = server.request("GET", "/api/manager/drivers/driver", &cookie, "");
+    let (status, _, drivers) = server.request("GET", "/api/manager/drivers/driver", &auth, "");
     assert_eq!(status, 200);
     assert!(drivers.contains("stulp:app:test.app:lamp"));
     std::thread::scope(|scope| {
@@ -367,7 +358,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
             server.request(
                 "GET",
                 "/api/stulp/apps/test.app/drivers/lamp/pair/devices",
-                &cookie,
+                &auth,
                 "",
             )
         });
@@ -387,7 +378,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
                 server.request(
                     "POST",
                     "/api/stulp/apps/test.app/drivers/lamp/pair/devices",
-                    &cookie,
+                    &auth,
                     r#"{"name":"New lamp","data":{"serial":"pair-test"},"capabilities":["onoff"]}"#,
                 )
             });
@@ -449,16 +440,11 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     // Instellingen worden pas opgeslagen na bevestiging; gelijktijdige bediening blijft bereikbaar.
     let device_route = format!("/api/manager/devices/device/{paired_id}");
     let settings_route = format!("{device_route}/settings");
-    assert_eq!(server.request("PUT", &settings_route, &cookie, "[]").0, 400);
+    assert_eq!(server.request("PUT", &settings_route, &auth, "[]").0, 400);
     for reject in [true, false] {
         std::thread::scope(|scope| {
             let request = scope.spawn(|| {
-                server.request(
-                    "PUT",
-                    &settings_route,
-                    &cookie,
-                    r#"{"address":"192.0.2.8"}"#,
-                )
+                server.request("PUT", &settings_route, &auth, r#"{"address":"192.0.2.8"}"#)
             });
             let call = loop {
                 let f = read_frame(&mut stream);
@@ -478,17 +464,12 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
                 json::text(json::get(params, "settings").unwrap(), "address"),
                 "192.0.2.8"
             );
-            let body = server.request("GET", &device_route, &cookie, "").2;
+            let body = server.request("GET", &device_route, &auth, "").2;
             assert!(!body.contains("192.0.2.8"));
-            assert_eq!(server.request("DELETE", &device_route, &cookie, "").0, 409);
+            assert_eq!(server.request("DELETE", &device_route, &auth, "").0, 409);
             assert_eq!(
                 server
-                    .request(
-                        "PUT",
-                        &settings_route,
-                        &cookie,
-                        r#"{"address":"192.0.2.9"}"#
-                    )
+                    .request("PUT", &settings_route, &auth, r#"{"address":"192.0.2.9"}"#)
                     .0,
                 409
             );
@@ -497,7 +478,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
                     .request(
                         "PUT",
                         &device_route,
-                        &cookie,
+                        &auth,
                         r#"{"name":"Renamed while validating"}"#
                     )
                     .0,
@@ -535,19 +516,14 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     // Een ongewijzigde patch veroorzaakt geen tweede apparaatcommando.
     assert_eq!(
         server
-            .request(
-                "PUT",
-                &settings_route,
-                &cookie,
-                r#"{"address":"192.0.2.8"}"#
-            )
+            .request("PUT", &settings_route, &auth, r#"{"address":"192.0.2.8"}"#)
             .0,
         200
     );
     // Verwijderen vraagt eerst de plugin, maar opruimfouten blokkeren de gebruiker niet.
     let route = format!("/api/manager/devices/device/{paired_id}");
     std::thread::scope(|scope| {
-        let request = scope.spawn(|| server.request("DELETE", &route, &cookie, ""));
+        let request = scope.spawn(|| server.request("DELETE", &route, &auth, ""));
         loop {
             let call = read_frame(&mut stream);
             match json::text(&call, "m") {
@@ -557,7 +533,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
                     &Frame::response(json::uint(&call, "id"), Ok(Value::Null)).unwrap(),
                 ),
                 "device.delete" => {
-                    assert_eq!(server.request("GET", &route, &cookie, "").0, 200);
+                    assert_eq!(server.request("GET", &route, &auth, "").0, 200);
                     send_frame(
                         &mut stream,
                         &Frame::response(json::uint(&call, "id"), Err("synthetic offline device"))
@@ -569,7 +545,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
             }
         }
         assert_eq!(request.join().unwrap().0, 200);
-        assert_eq!(server.request("GET", &route, &cookie, "").0, 404);
+        assert_eq!(server.request("GET", &route, &auth, "").0, 404);
         // Haal de uiteindelijke verwijderingssnapshot op vóór de volgende proef.
         let deletion = read_frame(&mut stream);
         assert_eq!(json::text(&deletion, "m"), "state.device");
@@ -636,7 +612,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
     // De controller antwoordt meteen als een callback zijn verbinding verliest.
     std::thread::scope(|scope| {
         let request = scope
-            .spawn(|| server.request("GET", "/api/stulp/apps/test.app/registrations", &cookie, ""));
+            .spawn(|| server.request("GET", "/api/stulp/apps/test.app/registrations", &auth, ""));
         let call = read_frame(&mut stream);
         assert_eq!(json::text(&call, "m"), "registrations");
         stream.shutdown(std::net::Shutdown::Both).unwrap();
@@ -650,7 +626,7 @@ fn attach_app_updates_device_before_ack_and_http_invokes_callback() {
 }
 
 #[test]
-fn original_ui_auth_crud_and_persistence_over_real_http() {
+fn bearer_auth_crud_and_persistence_over_real_http() {
     let temp = Temp::new();
     let path = temp.0.join("document.json");
     let server = Server::start(&path);
@@ -660,13 +636,29 @@ fn original_ui_auth_crud_and_persistence_over_real_http() {
             .0,
         401
     );
-    assert_eq!(server.request("GET", "/assets/style.css", "", "").0, 200);
+    let (status, headers, _) = server.request(
+        "GET",
+        "/api/stulp/health",
+        "Authorization: Bearer wrong-key",
+        "",
+    );
+    assert_eq!(status, 401);
+    assert!(headers.contains("WWW-Authenticate: Bearer"));
+    // Geen Manage meer: de sleutel-URL zet geen cookie en serveert niets.
+    let (status, headers, _) = server.request("GET", "/test-key", "", "");
+    assert_eq!(status, 404);
+    assert!(!headers.contains("Set-Cookie"));
+    assert_eq!(server.request("GET", "/stulp.js", "", "").0, 200);
+    assert_eq!(
+        server.request("GET", "/assets/app-frame.css", "", "").0,
+        200
+    );
     assert_eq!(server.request("GET", "/mcp/incorrect", "", "").0, 404);
-    let cookie = server.cookie();
+    let auth = server.auth();
     let (status, _, body) = server.request(
         "POST",
         "/api/stulp/device-groups",
-        &cookie,
+        &auth,
         r#"{"name":"Keuken"}"#,
     );
     assert_eq!(status, 201, "{body}");
@@ -677,7 +669,7 @@ fn original_ui_auth_crud_and_persistence_over_real_http() {
             .request(
                 "PUT",
                 &format!("/api/stulp/device-groups/{id}"),
-                &cookie,
+                &auth,
                 r#"{"name":"Woonkamer"}"#
             )
             .0,
@@ -685,8 +677,8 @@ fn original_ui_auth_crud_and_persistence_over_real_http() {
     );
     drop(server);
     let server = Server::start(&path);
-    let cookie = server.cookie();
-    let (status, _, body) = server.request("GET", "/api/stulp/device-groups", &cookie, "");
+    let auth = server.auth();
+    let (status, _, body) = server.request("GET", "/api/stulp/device-groups", &auth, "");
     assert_eq!(status, 200);
     assert!(body.contains("Woonkamer"));
     assert!(!body.contains("Keuken"));
@@ -695,7 +687,7 @@ fn original_ui_auth_crud_and_persistence_over_real_http() {
             .request(
                 "DELETE",
                 &format!("/api/stulp/device-groups/{id}"),
-                &cookie,
+                &auth,
                 ""
             )
             .0,
@@ -725,14 +717,14 @@ fn live_stream_delivers_mutations_without_reloading_or_blocking_http() {
     let temp = Temp::new();
     let path = temp.0.join("document.json");
     let server = Server::start(&path);
-    let cookie = server.cookie();
+    let auth = server.auth();
     let mut stream = TcpStream::connect(&server.address).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .unwrap();
     write!(
         stream,
-        "GET /api/stulp/events?view=overview HTTP/1.1\r\nHost: {}\r\nCookie: {cookie}\r\n\r\n",
+        "GET /api/stulp/events?view=overview HTTP/1.1\r\nHost: {}\r\n{auth}\r\n\r\n",
         server.address
     )
     .unwrap();
@@ -752,7 +744,7 @@ fn live_stream_delivers_mutations_without_reloading_or_blocking_http() {
             .request(
                 "POST",
                 "/api/stulp/device-groups",
-                &cookie,
+                &auth,
                 r#"{"name":"Live room"}"#
             )
             .0,
@@ -770,7 +762,7 @@ fn live_stream_delivers_mutations_without_reloading_or_blocking_http() {
     assert!(found, "SSE did not deliver the mutation");
     assert_eq!(
         server
-            .request("GET", "/api/stulp/manage/bootstrap", &cookie, "")
+            .request("GET", "/api/stulp/manage/bootstrap", &auth, "")
             .0,
         200
     );

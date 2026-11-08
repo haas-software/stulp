@@ -250,7 +250,6 @@ pub(super) fn dispatch<S: Storage>(
                 status: 200,
                 content_type: "text/event-stream",
                 body: super::Body::Static(b": connected\n\n"),
-                cookie: None,
                 headers: Vec::new(),
             });
         }

@@ -209,7 +209,6 @@ pub fn not_modified(etag: &str) -> Result<Response> {
         status: 304,
         content_type: "text/plain; charset=utf-8",
         body: stulp_web::Body::Static(b""),
-        cookie: None,
         headers: cache_headers(etag)?,
     })
 }
@@ -297,7 +296,7 @@ impl Asset {
                 }
             }
             let mut injection = join(&[
-                "<meta name=\"color-scheme\" content=\"dark\"><link rel=\"stylesheet\" href=\"/assets/app-frame.css\"><script>window.__STULP_CONTEXT__=",
+                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><link rel=\"stylesheet\" href=\"/assets/app-frame.css\"><script>window.__STULP_CONTEXT__=",
                 &safe,
                 ";</script>",
             ])?;
@@ -338,7 +337,6 @@ impl Asset {
             status: 200,
             content_type,
             body: Body::Bytes(bytes),
-            cookie: None,
             headers,
         })
     }

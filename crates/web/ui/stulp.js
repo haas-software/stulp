@@ -1,18 +1,45 @@
 'use strict';
 
+// De brug tussen een app-pagina (/app-ui/…) en de Stulp-app.
+//
+// De pagina staat zelf, top-level, in een WKWebView van de native app. Elke
+// aanroep gaat als één bericht naar de message handler `stulp` (een
+// WKScriptMessageHandlerWithReply), dus postMessage geeft een promise terug:
+//
+//   window.webkit.messageHandlers.stulp.postMessage({
+//     action:  'get' | 'set' | 'unset' | 'api' | 'emit' | 'showView' |
+//              'nextView' | 'prevView' | 'close' | 'title' | 'openURL' |
+//              'alert' | 'confirm' | 'ready' | 'navigationClose',
+//     args:    per action hieronder,
+//     context: window.__STULP_CONTEXT__   // {appId, sessionId, …} van de server
+//   })  →  Promise<antwoord>, of een afwijzing met de foutmelding als tekst
+//
+//   get        {name}                       → de waarde, of null als hij er niet is
+//   set        {name, value}                → true
+//   unset      {name}                       → true
+//   api        {method, path, body}         → het antwoord van /api/stulp/apps/<appId>/api/<path>
+//   emit       {event, data}                → het antwoord van de pair-handler <event>
+//   showView   {view}                       → true
+//   nextView   {}  prevView {}  close {}    → true
+//   title      {title}                      → true
+//   openURL    {url}                        → true (de app opent hem buiten de pagina)
+//   alert      {message, type}              → true
+//   confirm    {message, type}              → true of false
+//   ready      {}  navigationClose {}       → true
+//
+// De andere kant op roept de app `window.__stulpEvent(name, data)` aan via
+// evaluateJavaScript; dat gaat naar de luisteraars van Stulp.on(name, …).
 (function stulpBridge() {
   const context = window.__STULP_CONTEXT__ || {};
   const strings = window.__STULP_LOCALE__ || {};
-  const pending = new Map();
   const listeners = new Map();
-  let sequence = 0;
 
   function request(action, args) {
-    const id = `${Date.now()}-${++sequence}`;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      parent.postMessage({ channel: 'stulp-plugin', id, action, args, context }, '*');
-    });
+    const host = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.stulp;
+    if (!host) return Promise.reject(new Error('Deze pagina hoort in de Stulp-app.'));
+    return Promise.resolve(host.postMessage({ action, args, context })).then(
+      value => (value === undefined ? null : value),
+      error => { throw error instanceof Error ? error : new Error(String(error)); });
   }
 
   function callback(promise, done) {
@@ -29,19 +56,9 @@
     return value;
   }
 
-  window.addEventListener('message', event => {
-    const message = event.data || {};
-    if (message.channel === 'stulp-plugin-response') {
-      const operation = pending.get(message.id);
-      if (!operation) return;
-      pending.delete(message.id);
-      if (message.error) operation.reject(new Error(message.error));
-      else operation.resolve(message.result);
-    }
-    if (message.channel === 'stulp-plugin-event') {
-      for (const listener of listeners.get(message.event) || []) listener(message.data);
-    }
-  });
+  window.__stulpEvent = (event, data) => {
+    for (const listener of listeners.get(event) || []) listener(data);
+  };
 
   // element bouwt één stukje pagina. Zes plugins schreven hier hun eigen
   // variant van, en de een noemde het node en de ander bouwde het met de hand.
@@ -92,9 +109,8 @@
       return Stulp;
     },
     ready() { request('ready', {}).catch(() => {}); },
-    // openURL laat Manage een adres in een nieuw tabblad openen. Zelf openen
-    // kan niet: de pagina staat in een sandbox zonder allow-popups, dus een
-    // <a target="_blank"> en window.open doen daar allebei niets.
+    // openURL laat de app een adres buiten de pagina openen (OAuth, een
+    // handleiding). In de webview zelf navigeren zou de pagina vervangen.
     openURL(url, done) { return callback(request('openURL', { url: String(url) }), done); },
     alert(message, type, done) { return callback(request('alert', { message: String(message), type }), done); },
     confirm(message, type, done) { return callback(request('confirm', { message: String(message), type }), done); },

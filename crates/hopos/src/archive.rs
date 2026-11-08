@@ -26,7 +26,6 @@ pub(crate) fn route<S: Storage>(
             status: 200,
             content_type: "application/zip",
             body: Body::Bytes(bytes),
-            cookie: None,
             headers,
         });
     }

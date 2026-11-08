@@ -142,13 +142,15 @@ pub struct Request {
     pub path: String,
     /// Rauwe query voor app-API's en koppelsessies.
     pub query: String,
-    /// Browsercookie, nooit een Bearer-token.
+    /// Cookieheader. Alleen de sessiecookie van `/app-ui/` telt; de API
+    /// accepteert uitsluitend `Authorization: Bearer` (in `headers`).
     pub cookie: String,
     /// Host-header voor origincontrole.
     pub host: String,
     /// Eventuele Origin-header.
     pub origin: String,
-    /// Selectieve protocolheaders, met kleine letters als sleutel.
+    /// Selectieve protocolheaders, met kleine letters als sleutel, waaronder
+    /// `authorization`.
     pub headers: Value,
     /// Begrensde body.
     pub body: Vec<u8>,
@@ -201,8 +203,6 @@ pub struct Response {
     pub content_type: &'static str,
     /// Payload.
     pub body: Body,
-    /// Alleen aanwezig na het bezoeken van de sleutel-URL.
-    pub cookie: Option<String>,
     /// Aanvullende protocolheaders met vaste namen.
     pub headers: Vec<(&'static str, String)>,
 }
@@ -214,7 +214,6 @@ impl Response {
             status,
             content_type: "application/json; charset=utf-8",
             body: Body::Owned(json::to_string(value)?),
-            cookie: None,
             headers: Vec::new(),
         })
     }
@@ -242,8 +241,8 @@ pub trait Environment {
     fn log(&self, _source: &str, _level: &str, _message: &str) {}
 }
 
-/// Bevat geen huisstaat; alleen de browsertoegangsconfiguratie en de
-/// routetabel van de REST-API.
+/// Bevat geen huisstaat; alleen de toegangssleutel en de routetabel van de
+/// REST-API.
 pub struct Web {
     token: String,
     proof: String,
@@ -251,7 +250,8 @@ pub struct Web {
 }
 
 impl Web {
-    /// Bouwt dezelfde HttpOnly-sessie als de Go-versie.
+    /// `proof` is de waarde van de `stulp-session`-cookie waarmee de app de
+    /// pagina's onder `/app-ui/` laadt: hex(sha256("stulp web session\0" + sleutel)).
     pub fn new(token: &str) -> Result<Self> {
         let mut input = json::copy("stulp web session\0")?;
         input.try_reserve(token.len()).map_err(|_| Error::Memory)?;
@@ -297,36 +297,21 @@ impl Web {
                 }
             };
         }
-        if !self.token.is_empty()
-            && request.method == "GET"
-            && stulp_protocol::token::equal(
-                request.path.strip_prefix('/').unwrap_or(""),
-                &self.token,
-            )
-        {
-            let mut response = asset("/").ok_or(Error::Missing("UI"))?;
-            let mut cookie = json::copy("stulp-session=")?;
-            let suffix = "; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000";
-            cookie
-                .try_reserve(self.proof.len() + suffix.len())
-                .map_err(|_| Error::Memory)?;
-            cookie.push_str(&self.proof);
-            cookie.push_str(suffix);
-            response.cookie = Some(cookie);
-            return Ok(response);
-        }
-        let public = request.path.starts_with("/assets/")
-            || (request.method == "GET" && request.path.starts_with("/image/"))
-            || matches!(request.path.as_str(), "/manifest.webmanifest" | "/stulp.js");
-        if !public && !self.token.is_empty() && !self.has_cookie(&request.cookie) {
-            return Response::error(
-                if request.path.starts_with("/api/") {
-                    401
-                } else {
-                    404
-                },
-                "open /<key> before using Stulp",
+        let public = (request.method == "GET" && request.path.starts_with("/image/"))
+            || matches!(
+                request.path.as_str(),
+                "/stulp.js" | "/assets/stulp.js" | "/assets/app-frame.css"
             );
+        if !public && !self.authenticated(request) {
+            if !request.path.starts_with("/api/") {
+                return Response::error(404, "not found");
+            }
+            let mut response = Response::error(401, "missing or wrong bearer token")?;
+            response.headers.try_reserve(1).map_err(|_| Error::Memory)?;
+            response
+                .headers
+                .push(("WWW-Authenticate", json::copy("Bearer")?));
+            return Ok(response);
         }
         if !matches!(request.method.as_str(), "GET" | "HEAD" | "OPTIONS")
             && !request.origin.is_empty()
@@ -371,9 +356,21 @@ impl Web {
                 .is_some_and(|key| stulp_protocol::token::equal(key, &self.token))
     }
 
-    /// Extra hostroutes gebruiken precies dezelfde sessiecontrole als de basis-API.
+    /// Extra hostroutes gebruiken precies dezelfde controle als de basis-API:
+    /// het Bearer-token, of voor de app-pagina's onder `/app-ui/` de sessiecookie.
     pub fn authenticated(&self, request: &Request) -> bool {
-        self.token.is_empty() || self.has_cookie(&request.cookie)
+        self.token.is_empty()
+            || self.has_bearer(request)
+            || (request.path.starts_with("/app-ui/") && self.has_cookie(&request.cookie))
+    }
+    fn has_bearer(&self, request: &Request) -> bool {
+        json::text(&request.headers, "authorization")
+            .trim()
+            .split_once(' ')
+            .is_some_and(|(scheme, token)| {
+                scheme.eq_ignore_ascii_case("bearer")
+                    && stulp_protocol::token::equal(token.trim(), &self.token)
+            })
     }
     fn has_cookie(&self, cookie: &str) -> bool {
         cookie
@@ -385,17 +382,9 @@ impl Web {
     }
 }
 
+/// Alleen wat de app-pagina's onder `/app-ui/` zelf laden; de app is native.
 fn asset(path: &str) -> Option<Response> {
     let (content_type, bytes): (&str, &[u8]) = match path {
-        "/" | "/app" => (
-            "text/html; charset=utf-8",
-            include_bytes!("../ui/index.html"),
-        ),
-        "/assets/app.js" => (
-            "text/javascript; charset=utf-8",
-            include_bytes!("../ui/app.js"),
-        ),
-        "/assets/style.css" => ("text/css; charset=utf-8", include_bytes!("../ui/style.css")),
         "/assets/app-frame.css" => (
             "text/css; charset=utf-8",
             include_bytes!("../ui/app-frame.css"),
@@ -404,20 +393,12 @@ fn asset(path: &str) -> Option<Response> {
             "text/javascript; charset=utf-8",
             include_bytes!("../ui/stulp.js"),
         ),
-        "/manifest.webmanifest" => (
-            "application/manifest+json",
-            include_bytes!("../ui/manifest.webmanifest"),
-        ),
-        "/assets/icon-192.png" => ("image/png", include_bytes!("../ui/icon-192.png")),
-        "/assets/icon-512.png" => ("image/png", include_bytes!("../ui/icon-512.png")),
-        "/assets/stulp.svg" => ("image/svg+xml", include_bytes!("../ui/stulp.svg")),
         _ => return None,
     };
     Some(Response {
         status: 200,
         content_type,
         body: Body::Static(bytes),
-        cookie: None,
         headers: Vec::new(),
     })
 }

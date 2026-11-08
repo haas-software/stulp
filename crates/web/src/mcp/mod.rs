@@ -125,7 +125,6 @@ pub fn decode(req: &Request) -> Result<Dispatch> {
             status: 202,
             content_type: "application/json",
             body: crate::Body::Static(b""),
-            cookie: None,
             headers: Vec::new(),
         }));
     }

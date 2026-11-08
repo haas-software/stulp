@@ -118,8 +118,13 @@ fn compact_views_keep_controls_and_all_live_values_without_private_metadata() {
     assert_eq!(web.handle(&mut store, &req, &mut Env).unwrap().status, 400);
 }
 
+fn bearer(request: &mut Request, token: &str) {
+    request.headers =
+        json::parse(format!(r#"{{"authorization":"Bearer {token}"}}"#).as_bytes()).unwrap();
+}
+
 #[test]
-fn cookie_auth_and_origin_check_precede_mutations() {
+fn bearer_auth_and_origin_check_precede_mutations() {
     let mut store = store();
     let web = Web::new("secret-key").unwrap();
     let before = store.document().encode().unwrap();
@@ -128,14 +133,20 @@ fn cookie_auth_and_origin_check_precede_mutations() {
         "/api/manager/apps/app/a/setting/test",
         r#"{"value":true}"#,
     );
+    let refused = web.handle(&mut store, &write, &mut Env).unwrap();
+    assert_eq!(refused.status, 401);
+    assert!(
+        refused
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "WWW-Authenticate" && value == "Bearer")
+    );
+    bearer(&mut write, "wrong-key");
     assert_eq!(
         web.handle(&mut store, &write, &mut Env).unwrap().status,
         401
     );
-    let login = web
-        .handle(&mut store, &request("GET", "/secret-key", ""), &mut Env)
-        .unwrap();
-    write.cookie = login.cookie.unwrap().split(';').next().unwrap().into();
+    bearer(&mut write, "secret-key");
     write.origin = "http://evil.example".into();
     assert_eq!(
         web.handle(&mut store, &write, &mut Env).unwrap().status,
@@ -147,6 +158,68 @@ fn cookie_auth_and_origin_check_precede_mutations() {
         web.handle(&mut store, &write, &mut Env).unwrap().status,
         200
     );
+    // De app stuurt geen Origin; het schema is hoofdletterongevoelig.
+    write.origin = String::new();
+    write.headers = json::parse(br#"{"authorization":"bearer secret-key"}"#).unwrap();
+    assert_eq!(
+        web.handle(&mut store, &write, &mut Env).unwrap().status,
+        200
+    );
+}
+
+#[test]
+fn the_key_url_is_gone_and_the_cookie_only_opens_app_pages() {
+    let mut store = store();
+    let web = Web::new("secret-key").unwrap();
+    // Geen Manage meer: de sleutel-URL is een onbekend pad zonder cookie.
+    let entry = web
+        .handle(&mut store, &request("GET", "/secret-key", ""), &mut Env)
+        .unwrap();
+    assert_eq!(entry.status, 404);
+    assert!(entry.headers.iter().all(|(name, _)| *name != "Set-Cookie"));
+    for path in ["/", "/assets/app.js", "/manifest.webmanifest"] {
+        let mut get = request("GET", path, "");
+        bearer(&mut get, "secret-key");
+        assert_eq!(
+            web.handle(&mut store, &get, &mut Env).unwrap().status,
+            404,
+            "{path}"
+        );
+    }
+    // De brug en de gedeelde stijl van app-pagina's blijven openbaar.
+    for path in ["/stulp.js", "/assets/app-frame.css"] {
+        assert_eq!(
+            web.handle(&mut store, &request("GET", path, ""), &mut Env)
+                .unwrap()
+                .status,
+            200,
+            "{path}"
+        );
+    }
+    // hex(sha256("stulp web session\0secret-key"))
+    let proof = leancrypto_proof("secret-key");
+    let mut api = request("GET", "/api/stulp/health", "");
+    api.cookie = format!("stulp-session={proof}");
+    assert!(!web.authenticated(&api));
+    assert_eq!(web.handle(&mut store, &api, &mut Env).unwrap().status, 401);
+    let mut page = request("GET", "/app-ui/a/settings/index.html", "");
+    page.cookie = format!("other=1; stulp-session={proof}");
+    assert!(web.authenticated(&page));
+    page.cookie = "stulp-session=wrong".into();
+    assert!(!web.authenticated(&page));
+    assert_eq!(web.handle(&mut store, &page, &mut Env).unwrap().status, 404);
+    bearer(&mut page, "secret-key");
+    page.cookie = String::new();
+    assert!(web.authenticated(&page));
+}
+
+fn leancrypto_proof(token: &str) -> String {
+    let mut input = b"stulp web session\0".to_vec();
+    input.extend_from_slice(token.as_bytes());
+    leancrypto::sha256::Sha256::digest(&input)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[test]

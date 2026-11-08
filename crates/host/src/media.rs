@@ -30,7 +30,6 @@ pub(crate) fn response(value: &Value, owner: u64, image: bool) -> Result<Respons
             mime: json::copy(mime)?,
             owner,
         },
-        cookie: None,
         headers: Vec::new(),
     })
 }

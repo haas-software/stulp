@@ -36,12 +36,13 @@ place that touches the host's libc.
 
 ## Matter, without a radio
 
-The experimental native companion under `ios/` lets an iPhone scan a
+The native Stulp app under `apple/` (iPhone, iPad and Mac) lets an iPhone scan a
 factory-new Matter accessory and provision its Wi-Fi or Thread network
 directly. iOS supplies the temporary BLE path; Stulp then commissions its own
 fabric over IP, so there is no Homey or Apple Home pairing code to copy. Its
 Swift and HTTP path are tested; factory-new hardware validation is still the
-release gate. See [`ios/README.md`](ios/README.md) for signing and device setup.
+release gate. See [`apple/README.md`](apple/README.md) for building, signing and
+device setup.
 
 Matter is multi-admin too, so an accessory already commissioned in Apple Home
 can still be shared with Stulp over the network. For Thread, an Apple TV,
@@ -62,7 +63,7 @@ already in the house.
 | `crates/protocol` | the wire protocol between controller and app, with frame caps |
 | `crates/runtime` | the app-side runtime: snapshot, devices, callbacks |
 | `crates/controller` | the owner of document, apps, pairing, Flows, scenes and media |
-| `crates/web` | the keyed Manage interface, its private browser API, SSE and MCP; `ui/` holds the assets |
+| `crates/web` | the REST API behind a Bearer key, SSE and MCP; `ui/` holds the bridge and stylesheet for app-owned pages |
 | `crates/host` | `stulp-host`: the native controller binary, CLI, supervision, backup |
 | `crates/sdk` | what a plugin is written against |
 | `crates/plugin-host` | the native plugin process: HTTP, TLS, DNS, streams, media |
@@ -86,11 +87,18 @@ STULP_TOKEN=EEN-LANGE-WILLEKEURIGE-SLEUTEL target/release/stulp-host \
   --document stulp.json serve --listen 127.0.0.1:8080
 ```
 
-Open Manage at `http://127.0.0.1:8080/EEN-LANGE-WILLEKEURIGE-SLEUTEL`. The same
-key exposes the stateless MCP server at `/mcp/EEN-LANGE-WILLEKEURIGE-SLEUTEL`.
-Visiting the Manage URL establishes an HttpOnly browser session; there is no
-API-key field in the interface and the private browser API does not accept
-Bearer tokens.
+Stulp serves an API and no web interface of its own. The Stulp app for iPhone,
+iPad and Mac connects with the address and that key and sends it on every call as
+`Authorization: Bearer EEN-LANGE-WILLEKEURIGE-SLEUTEL`; so does any other client:
+
+```sh
+curl -H 'Authorization: Bearer EEN-LANGE-WILLEKEURIGE-SLEUTEL' \
+  http://127.0.0.1:8080/api/stulp/health
+```
+
+The same key exposes the stateless MCP server at
+`/mcp/EEN-LANGE-WILLEKEURIGE-SLEUTEL`. The only HTML left is what an app ships
+itself — its settings page and pair views — which the app shows in a web view.
 
 `build.sh` builds the controller and every app in `plugins/*` into
 `target/release/`: `stulp-host` and `stulp-<name>` for each plugin. The other

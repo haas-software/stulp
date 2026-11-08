@@ -330,7 +330,6 @@ async fn controller<S: Storage>(
                 status: 200,
                 content_type: "text/event-stream",
                 body: stulp_web::Body::Owned(body),
-                cookie: None,
                 headers: Vec::new(),
             };
             match s.reply.try_send(response) {
@@ -705,6 +704,7 @@ async fn worker(
                     ("Content-Type", "content-type"),
                     ("Accept", "accept"),
                     ("MCP-Protocol-Version", "mcp-protocol-version"),
+                    ("Authorization", "authorization"),
                 ] {
                     json::set(
                         &mut protocol_headers,
@@ -781,9 +781,6 @@ async fn worker(
                 header.set("Referrer-Policy", "no-referrer")?;
                 header.set("X-Content-Type-Options", "nosniff")?;
                 header.set("X-Stulp-Version", env!("CARGO_PKG_VERSION"))?;
-                if let Some(cookie) = response.cookie {
-                    header.set("Set-Cookie", &cookie)?;
-                }
                 for (name, value) in &response.headers {
                     header.set(name, value)?;
                 }
