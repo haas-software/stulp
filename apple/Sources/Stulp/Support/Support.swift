@@ -13,12 +13,15 @@ enum DebugLaunch {
     static var tab: String? { UserDefaults.standard.string(forKey: "stulpTab") }
     /// `-stulpOpen <device id>`: open that device's detail at launch.
     static var open: String? { UserDefaults.standard.string(forKey: "stulpOpen") }
+    /// `-stulpScrollTo Keuken`: start Thuis scrolled to that heading.
+    static var scrollTo: String? { UserDefaults.standard.string(forKey: "stulpScrollTo") }
     #else
     static let demo = false
     static let address: String? = nil
     static let key: String? = nil
     static let tab: String? = nil
     static let open: String? = nil
+    static let scrollTo: String? = nil
     #endif
 }
 

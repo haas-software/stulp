@@ -13,24 +13,33 @@ struct HomeView: View {
     @Environment(HomeModel.self) private var model
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if !model.loaded {
-                    ProgressView("Stulp laden…")
-                        .frame(maxWidth: .infinity, minHeight: 240)
-                } else if model.visibleDevices.isEmpty {
-                    empty
-                } else {
-                    content
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    if !model.loaded {
+                        ProgressView("Stulp laden…")
+                            .frame(maxWidth: .infinity, minHeight: 240)
+                    } else if model.visibleDevices.isEmpty {
+                        empty
+                    } else {
+                        content
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 1100)
+                .frame(maxWidth: .infinity)
+            }
+            .sectionTitles("Thuis")
+            .task(id: model.loaded) {
+                // `-stulpScrollTo Keuken`: start scrolled to that heading, for screenshots.
+                if model.loaded, let heading = DebugLaunch.scrollTo {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    proxy.scrollTo(SectionTracker.scrollID(heading), anchor: .top)
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 24)
-            .frame(maxWidth: 1100)
-            .frame(maxWidth: .infinity)
         }
         .background(HomeBackground())
-        .navigationTitle("Thuis")
         .largeTitle()
         .navigationDestination(for: HomeRoute.self) { route in
             switch route {
@@ -226,8 +235,8 @@ struct CategoryView: View {
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
         }
+        .sectionTitles(category.title)
         .background(HomeBackground())
-        .navigationTitle(category.title)
         .largeTitle()
         .refreshable { await model.reloadDevices() }
     }
@@ -283,8 +292,8 @@ struct RoomView: View {
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
         }
+        .sectionTitles(model.group(groupID)?.name ?? "Ruimte")
         .background(HomeBackground())
-        .navigationTitle(model.group(groupID)?.name ?? "Ruimte")
         .largeTitle()
         .toolbar {
             ToolbarItem(placement: .trailingBar) {

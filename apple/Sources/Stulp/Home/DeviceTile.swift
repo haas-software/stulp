@@ -170,6 +170,7 @@ struct SectionTitle<Destination: Hashable>: View {
             }
         }
         .padding(.top, 6)
+        .tracksSection(title)
     }
 
     private func label(chevron: Bool) -> some View {
