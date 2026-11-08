@@ -97,6 +97,12 @@ enum FlowText {
         if argument.type == "checkbox" || argument.type == "boolean", let b = value.bool { return b ? "ja" : "nee" }
         if let n = value.number {
             let text = DevicePresentation.number(n, decimals: 2)
+            // "gedurende [[seconds]] seconden" already says its unit: adding one reads "120 s seconden".
+            if let template = card.titleFormatted, let marker = template.range(of: "[[\(argument.name)]]"),
+               template[marker.upperBound...].first == " ",
+               template[marker.upperBound...].dropFirst().first?.isLetter == true {
+                return text
+            }
             guard let units = argument.units, !units.isEmpty else {
                 return argument.name == "seconds" ? "\(text) s" : text
             }

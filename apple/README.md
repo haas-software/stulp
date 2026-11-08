@@ -10,14 +10,20 @@ Eén SwiftUI-app voor iPhone (ook de opvouwbare iPhone Duo), iPad en Mac (`platf
 `supportedDestinations: [iOS, macOS]`; de destination kiest het platform). De indeling volgt
 Apple's Woning-app.
 
-- **iPhone:** tabbladen *Thuis*, *Automatisering* en *Instellingen*. *Thuis* toont bovenaan de
-  categorieën (Klimaat, Verlichting, Beveiliging, …) met wat er speelt, daaronder de scènes, de
-  camera's en per ruimte de tegels. Tik op het symbool van een tegel om hem te schakelen, op de
-  rest voor de bediening; lang drukken geeft verplaatsen en verwijderen. De plus voegt een
-  apparaat (ook een fabrieksnieuw Matter-apparaat via Apple's eigen scherm), een scène of een
-  ruimte toe; de bel opent de meldingen van Stulp.
-- **iPad en een opengevouwen Duo:** dezelfde tabbladen als zijbalk, met de categorieën en ruimtes
-  erin, zoals Woning op de iPad.
+- **iPhone:** onderin *Thuis* en de locaties op het eerste niveau (Beneden, Eerste etage, Tuin),
+  elk met het icoon uit de ruimte-editor. *Thuis* toont bovenaan de categorieën (Klimaat,
+  Verlichting, Beveiliging, …) met wat er speelt, daaronder de scènes, de camera's en per ruimte de
+  tegels; de balk toont de ruimte waar je langs scrolt. Tik op het symbool van een tegel om hem te
+  schakelen, op de rest voor de bediening; lang drukken geeft verplaatsen en verwijderen. Het menu
+  (…) bovenin leidt naar *Automatisering*, *Meldingen* en *Instellingen*; de plus voegt een
+  apparaat (ook een fabrieksnieuw Matter-apparaat via Apple's eigen scherm) of een ruimte toe.
+- **Automatisering:** een Flow op een canvas, zoals Stulp hem altijd tekende: kaarten (Als blauw,
+  En oranje, Dan groen) waar je ze neerzet, lijnen van een uitgang naar de volgende kaart. Slepen
+  verplaatst, vanaf de uitgang slepen verbindt (of tik de uitgang en dan de kaart), het bolletje
+  midden op een lijn haalt hem weg, knijpen zoomt, dubbeltikken zet een kaart neer
+  (`Flows/FlowCanvas.swift`).
+- **iPad en een opengevouwen Duo:** dezelfde tabbladen als zijbalk, met ook de categorieën,
+  *Automatisering* en *Instellingen* erin, zoals Woning op de iPad.
 - **Mac:** een venster met zijbalk (*Thuis*, de categorieën, de ruimtes, *Automatisering*,
   *Meldingen*, *Apps*) en de instellingen in ⌘,. ⌘N voegt een apparaat toe, ⌘R vernieuwt. Geen
   Matter-koppeling, meldingen of thuis/weg: dat is werk van de telefoon.
@@ -45,7 +51,6 @@ apple/
 │   │   ├── StulpClient.swift       de API met Bearer-token
 │   │   ├── EventStream.swift       de live-stream (server-sent events)
 │   │   ├── Models.swift, Flows.swift   apparaten, ruimtes, scènes, apps, drivers, Flows, kaarten
-│   │   ├── FlowRules.swift         een Flow-graaf ⇄ regels Als/En/Dan
 │   │   ├── Presentation.swift      wat een tegel zegt: waarde, woorden, symbool, categorie
 │   │   ├── MatterCommissioning.swift  de iPhone-helft van een Matter-koppeling
 │   │   └── StulpConfiguration.swift   verbinding in de sleutelhanger, app-groep, thuis/weg
@@ -54,7 +59,7 @@ apple/
 │   │   ├── RootView.swift          tabbladen (iOS) of zijbalkvenster (Mac)
 │   │   ├── Home/                   Thuis, categorieën, ruimtes, tegels, camera's
 │   │   ├── Devices/                bediening en instellingen van één apparaat
-│   │   ├── Flows/                  Automatisering: Flows als Als/En/Dan-regels
+│   │   ├── Flows/                  Automatisering: de Flow op een canvas, de kaartkiezer, de velden
 │   │   ├── Scenes/                 scènes maken en bewerken
 │   │   ├── Pairing/                apparaat toevoegen, apps
 │   │   ├── Web/                    de webview voor de pagina's van een app (stulp.js-brug)
@@ -62,7 +67,7 @@ apple/
 │   │   └── iOS/                    push, thuis/weg, Opdrachten
 │   ├── StulpMatterSetup/       Matter Setup Extension (alleen iOS)
 │   └── StulpNotification/      Notification Service Extension: camerabeeld bij een melding
-├── Tests/StulpKitTests/        Swift Testing: verbinding, client, stream, modellen, weergave, regels
+├── Tests/StulpKitTests/        Swift Testing: verbinding, client, stream, modellen, weergave, kaartzinnen
 └── tools/                      testflight.sh, build-ipa.sh, set-apns-key.sh
 ```
 

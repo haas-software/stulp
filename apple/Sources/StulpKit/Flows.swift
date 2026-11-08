@@ -2,8 +2,8 @@ import Foundation
 
 /// A Flow as Stulp stores it: a graph of cards (`nodes`) and the lines between them (`edges`).
 /// Stulp runs it breadth first from the trigger that fired, one card at a time and in edge order;
-/// a false condition or a failed action stops only its own branch. The app edits it as rules
-/// (`FlowRules`), but what travels is always this graph.
+/// a false condition or a failed action stops only its own branch. The app draws and edits exactly
+/// this graph on its canvas (`FlowCanvasEditor`).
 public struct Flow: Identifiable, Sendable, Hashable, Codable {
     public var id: String
     public var name: String

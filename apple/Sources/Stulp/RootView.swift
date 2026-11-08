@@ -244,6 +244,19 @@ private struct MainMenu: ViewModifier {
                     }
                 }
             }
+            .task {
+                #if DEBUG
+                // `-stulpTab automations|notifications|settings` on an iPhone: through the menu.
+                if width != .regular, route == nil {
+                    switch DebugLaunch.tab {
+                    case "automations": route = .automations
+                    case "notifications": route = .notifications
+                    case "settings": route = .settings
+                    default: break
+                    }
+                }
+                #endif
+            }
             .navigationDestination(item: $route) { route in
                 switch route {
                 case .automations: FlowsView()

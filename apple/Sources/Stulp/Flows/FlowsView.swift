@@ -36,10 +36,10 @@ struct FlowsView: View {
         .refreshable { await load() }
         .task { await load() }
         .sheet(isPresented: $creating) {
-            FlowEditor(flow: nil).environment(model)
+            FlowCanvasEditor(flow: nil).environment(model)
         }
         .sheet(item: $editing) { flow in
-            FlowEditor(flow: flow).environment(model)
+            FlowCanvasEditor(flow: flow).environment(model)
         }
         .confirmationDialog("\(deleting?.name ?? "Flow") verwijderen?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
