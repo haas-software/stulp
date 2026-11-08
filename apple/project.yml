@@ -1,90 +1,149 @@
 name: Stulp
+
 options:
   bundleIdPrefix: software.haas
+  developmentLanguage: nl
+  createIntermediateGroups: true
   deploymentTarget:
-    iOS: "17.0"
-  xcodeVersion: "26.0"
+    iOS: "27.0"
+    macOS: "26.0"
+  xcodeVersion: "27.1"
 
 settings:
   base:
-    DEVELOPMENT_TEAM: QVY3KR44QS
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    CURRENT_PROJECT_VERSION: 1
-    MARKETING_VERSION: 1.0.0
+    SWIFT_APPROACHABLE_CONCURRENCY: NO
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: QVY3KR44QS
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    TARGETED_DEVICE_FAMILY: "1,2"
+    # Shared container of the app and its extensions (Matter setup, notifications). The same
+    # identifiers as the 1.x WebView app, so an existing install keeps its connection.
+    STULP_APP_GROUP: group.software.haas.stulp
+    # macOS: a team-prefixed group needs no provisioning profile; a `group.` group on macOS must be
+    # in an explicit profile, otherwise the system asks for consent and blocks.
+    "STULP_APP_GROUP[sdk=macosx*]": $(TeamIdentifierPrefix)software.haas.stulp
+    STULP_KEYCHAIN_GROUP: $(AppIdentifierPrefix)software.haas.stulp.shared
 
 targets:
+  # Stulp's API, its models and the rules that decide how a device reads. No UI; linked by the app
+  # and by the Matter extension, so extension-safe only.
+  StulpKit:
+    type: framework
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Sources/StulpKit
+        excludes:
+          - "**/*.md"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp.kit
+        PRODUCT_NAME: StulpKit
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        DEFINES_MODULE: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+
+  StulpKitTests:
+    type: bundle.unit-test
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Tests/StulpKitTests
+    dependencies:
+      - target: StulpKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # The app: one multiplatform SwiftUI target for iPhone (incl. the foldable iPhone Duo), iPad and
+  # Mac. Matter setup, push and presence are iPhone/iPad only.
   Stulp:
     type: application
-    platform: iOS
+    platform: auto
+    supportedDestinations: [iOS, macOS]
     sources:
-      - path: Shared
-      - path: StulpApp
-    resources:
-      - path: StulpApp/Assets.xcassets
+      - path: Sources/Stulp
+        excludes:
+          - "*.entitlements"
+    dependencies:
+      - target: StulpKit
+      - target: StulpMatterSetup
+        destinationFilters: [iOS]
+      - target: StulpNotification
+        destinationFilters: [iOS]
+      - sdk: Matter.framework
+        destinationFilters: [iOS]
+      - sdk: MatterSupport.framework
+        destinationFilters: [iOS]
     info:
-      path: StulpApp/Info.plist
+      path: Sources/Stulp/Info.plist
       properties:
-        CFBundleDevelopmentRegion: nl
+        CFBundleDisplayName: Stulp
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleDisplayName: Stulp
-        LSRequiresIPhoneOS: true
+        CFBundleDevelopmentRegion: nl
+        # Export compliance: only Apple's TLS (URLSession) and hashing, no own encryption.
+        ITSAppUsesNonExemptEncryption: false
+        # Stulp usually runs in the house: plain http on the LAN is allowed, the internet is https.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSBonjourServices:
           - _matter._tcp
           - _matterc._udp
           - _matterd._udp
-        NSLocalNetworkUsageDescription: Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen controller toe te voegen.
-        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Stulp verbindt met je eigen Stulp in het lokale netwerk en voegt Matter-apparaten daar rechtstreeks aan toe.
         NSLocationWhenInUseUsageDescription: Stulp gebruikt je locatie om je thuis in te stellen.
-        NSLocationAlwaysAndWhenInUseUsageDescription: Stulp meldt aan je eigen controller wanneer je thuiskomt of weggaat, ook als de app niet open is. Je locatie zelf gaat nergens heen.
-        StulpAppGroup: group.software.haas.stulp
-        StulpKeychainAccessGroup: $(AppIdentifierPrefix)software.haas.stulp.shared
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
-        UILaunchScreen: {}
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-    entitlements:
-      path: StulpApp/Stulp.entitlements
-      properties:
-        # Xcode zet dit bij een App Store-export zelf op production.
-        aps-environment: development
-        com.apple.developer.usernotifications.time-sensitive: true
-        com.apple.security.application-groups:
-          - group.software.haas.stulp
-        keychain-access-groups:
-          - $(AppIdentifierPrefix)software.haas.stulp.shared
+        NSLocationAlwaysAndWhenInUseUsageDescription: Stulp meldt aan je eigen Stulp wanneer je thuiskomt of weggaat, ook als de app niet open is. Je locatie zelf gaat nergens heen.
+        # Read at runtime (StulpKit's StulpBundle), so the identifiers live in one place.
+        StulpAppGroup: $(STULP_APP_GROUP)
+        StulpKeychainAccessGroup: $(STULP_KEYCHAIN_GROUP)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp
         PRODUCT_NAME: Stulp
-        CODE_SIGN_STYLE: Automatic
-        TARGETED_DEVICE_FAMILY: "1,2"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-    dependencies:
-      - target: StulpMatterSetup
-        embed: true
-      - target: StulpNotification
-        embed: true
-      - sdk: Matter.framework
-      - sdk: MatterSupport.framework
-      - sdk: Security.framework
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+        # Per platform: the generated Info.plist keys and the entitlements (sandbox only on macOS).
+        "INFOPLIST_KEY_LSRequiresIPhoneOS[sdk=iphone*]": YES
+        "INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*]": YES
+        "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*]": YES
+        "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphone*]": YES
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone[sdk=iphone*]": "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad[sdk=iphone*]": "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        "INFOPLIST_KEY_LSApplicationCategoryType[sdk=macosx*]": public.app-category.lifestyle
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphone*]": Sources/Stulp/Stulp-iOS.entitlements
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Sources/Stulp/Stulp-macOS.entitlements
+        "ENABLE_APP_SANDBOX[sdk=macosx*]": YES
+        "ENABLE_HARDENED_RUNTIME[sdk=macosx*]": YES
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]":
+          - $(inherited)
+          - "@executable_path/../Frameworks"
 
+  # Apple's Matter setup flow hands the onboarding code to this extension, which gives it to
+  # Stulp's own pairing; Stulp then commissions the accessory into its own fabric.
   StulpMatterSetup:
     type: app-extension
     platform: iOS
     sources:
-      - path: Shared
-      - path: StulpMatterSetup
+      - path: Sources/StulpMatterSetup
+        excludes:
+          - "*.entitlements"
+    dependencies:
+      - target: StulpKit
+        embed: false
+      - sdk: Matter.framework
+      - sdk: MatterSupport.framework
     info:
-      path: StulpMatterSetup/Info.plist
+      path: Sources/StulpMatterSetup/Info.plist
       properties:
         CFBundleDevelopmentRegion: nl
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -96,39 +155,43 @@ targets:
           - _matter._tcp
           - _matterc._udp
           - _matterd._udp
-        NSLocalNetworkUsageDescription: Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen controller toe te voegen.
+        NSLocalNetworkUsageDescription: Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen Stulp toe te voegen.
         NSExtension:
           NSExtensionPointIdentifier: com.apple.matter.support.extension.device-setup
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).MatterRequestHandler
-        StulpAppGroup: group.software.haas.stulp
-        StulpKeychainAccessGroup: $(AppIdentifierPrefix)software.haas.stulp.shared
+        StulpAppGroup: $(STULP_APP_GROUP)
+        StulpKeychainAccessGroup: $(STULP_KEYCHAIN_GROUP)
     entitlements:
-      path: StulpMatterSetup/StulpMatterSetup.entitlements
+      path: Sources/StulpMatterSetup/StulpMatterSetup.entitlements
       properties:
         com.apple.developer.matter.allow-setup-payload: true
         com.apple.security.application-groups:
-          - group.software.haas.stulp
+          - $(STULP_APP_GROUP)
         keychain-access-groups:
-          - $(AppIdentifierPrefix)software.haas.stulp.shared
+          - $(STULP_KEYCHAIN_GROUP)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp.MatterSetup
         PRODUCT_NAME: StulpMatterSetup
-        CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
-    dependencies:
-      - sdk: Matter.framework
-      - sdk: MatterSupport.framework
-      - sdk: Security.framework
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
 
+  # Fetches the camera still a notification points at (`stulp.image`).
   StulpNotification:
     type: app-extension
     platform: iOS
     sources:
-      - path: StulpNotification
+      - path: Sources/StulpNotification
+        excludes:
+          - "*.entitlements"
+    dependencies:
+      - sdk: UserNotifications.framework
     info:
-      path: StulpNotification/Info.plist
+      path: Sources/StulpNotification/Info.plist
       properties:
         CFBundleDevelopmentRegion: nl
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -137,42 +200,35 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
-        StulpAppGroup: group.software.haas.stulp
+        StulpAppGroup: $(STULP_APP_GROUP)
     entitlements:
-      path: StulpNotification/StulpNotification.entitlements
+      path: Sources/StulpNotification/StulpNotification.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.software.haas.stulp
+          - $(STULP_APP_GROUP)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp.Notification
         PRODUCT_NAME: StulpNotification
-        CODE_SIGN_STYLE: Automatic
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
-    dependencies:
-      - sdk: UserNotifications.framework
-
-  StulpTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: Shared
-      - path: StulpTests
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: software.haas.stulp.tests
-        GENERATE_INFOPLIST_FILE: YES
-    dependencies:
-      - sdk: Security.framework
 
 schemes:
+  # One scheme for all platforms; the destination picks the platform.
   Stulp:
     build:
       targets:
         Stulp: all
-        StulpMatterSetup: all
-        StulpNotification: all
+        StulpKitTests: [test]
+    run:
+      config: Debug
+      commandLineArguments:
+        "-stulpAddress http://127.0.0.1:8080 -stulpKey dev": false
+        "-stulpDemo YES": false
     test:
+      config: Debug
+      gatherCoverageData: false
       targets:
-        - StulpTests
+        - StulpKitTests
+    archive:
+      config: Release

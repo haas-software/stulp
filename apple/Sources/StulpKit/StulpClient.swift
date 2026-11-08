@@ -1,513 +1,441 @@
 import Foundation
 
-actor StulpClient {
-  private static let matterAppID = "com.stulp.matter"
-  private static let matterDriverID = "matter"
+/// Stulp's HTTP API with the key as a Bearer token. Stateless: every call is one request, so the
+/// app, the Matter extension and a Shortcuts action can each make one when they need it.
+public struct StulpClient: Sendable {
+    public let connection: StulpConnection
+    let session: URLSession
+    let logSource: String
 
-  private let connection: StulpConnection
-  private let session: URLSession
-  private let pollIntervalNanoseconds: UInt64
-  private let commissioningTimeout: Duration
-  private let candidateRetryDelayNanoseconds: UInt64
-  private let logSource: String
-  private var cookie: String?
-
-  init(
-    connection: StulpConnection,
-    configuration: URLSessionConfiguration = .ephemeral,
-    pollIntervalNanoseconds: UInt64 = 1_500_000_000,
-    commissioningTimeout: Duration = .seconds(195),
-    candidateRetryDelayNanoseconds: UInt64 = 250_000_000,
-    logSource: String = "ios"
-  ) {
-    self.connection = connection
-    self.logSource = logSource
-    configuration.timeoutIntervalForRequest = 25
-    configuration.timeoutIntervalForResource = 35
-    configuration.httpShouldSetCookies = false
-    self.session = URLSession(configuration: configuration)
-    self.pollIntervalNanoseconds = pollIntervalNanoseconds
-    self.commissioningTimeout = commissioningTimeout
-    self.candidateRetryDelayNanoseconds = candidateRetryDelayNanoseconds
-  }
-
-  func validate() async throws -> StulpHealth {
-    try await authenticate()
-    return try await request("/api/stulp/health", as: StulpHealth.self)
-  }
-
-  /// Eén regel op de console van de controller, naast de plugin- en
-  /// requestregels. Stulp slaat niets op; een fout hier is nooit een reden om
-  /// een koppeling af te breken, dus de aanroeper negeert hem.
-  func log(_ level: String, _ message: String) async throws {
-    _ = try await requestData(
-      "/api/stulp/log",
-      method: "POST",
-      body: try JSONSerialization.data(withJSONObject: [
-        "source": logSource, "level": level, "message": String(message.prefix(1000)),
-      ]),
-      contentType: "application/json"
-    )
-  }
-
-  /// Fire-and-forget variant voor onderweg in een koppeling.
-  nonisolated func trace(_ message: String) {
-    trace("info", message)
-  }
-
-  nonisolated func trace(_ level: String, _ message: String) {
-    Task { try? await self.log(level, message) }
-  }
-
-  /// De telefoon-apparaten van de Meldingen-app, om dit toestel aan te wijzen.
-  func phones() async throws -> [StulpPhone] {
-    let data = try await requestData("/api/manager/devices/device")
-    let all = try JSONDecoder().decode([String: StulpPhone].self, from: data)
-    return all.values
-      .filter { $0.appId == "com.stulp.notify" }
-      .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
-  }
-
-  /// Maakt voor deze app een eigen telefoon-apparaat in Stulp; meldingen komen
-  /// daarna via het APNs-token. `installation` is per installatie vast, zodat
-  /// opnieuw registreren hetzelfde apparaat teruggeeft.
-  func registerPhone(name: String, installation: String) async throws -> StulpPhone {
-    let body = try JSONSerialization.data(withJSONObject: [
-      "name": name,
-      "data": ["kind": "app", "installation": installation],
-    ])
-    let data = try await requestData(
-      "/api/stulp/apps/com.stulp.notify/drivers/phone/pair/devices",
-      method: "POST",
-      body: body,
-      contentType: "application/json"
-    )
-    return try JSONDecoder().decode(StulpPhone.self, from: data)
-  }
-
-  /// Het APNs-token van deze app voor dit toestel; Stulp stuurt daarheen.
-  func registerPush(deviceId: String, token: String, environment: String) async throws {
-    let body = try JSONSerialization.data(withJSONObject: [
-      "deviceId": deviceId, "token": token, "environment": environment,
-    ])
-    _ = try await requestData(
-      "/api/stulp/apps/com.stulp.notify/api/register_push",
-      method: "POST",
-      body: body,
-      contentType: "application/json"
-    )
-  }
-
-  /// Meldt wat de telefoon weet (lader, thuis) op zijn apparaat.
-  func report(deviceId: String, values: [String: Bool]) async throws {
-    let body = try JSONSerialization.data(withJSONObject: [
-      "deviceId": deviceId, "values": values,
-    ])
-    _ = try await requestData(
-      "/api/stulp/apps/com.stulp.notify/api/report",
-      method: "POST",
-      body: body,
-      contentType: "application/json"
-    )
-  }
-
-  func groups() async throws -> [StulpDeviceGroup] {
-    try await request("/api/stulp/device-groups", as: [StulpDeviceGroup].self)
-  }
-
-  // MatterSupport heeft het apparaat vóór deze callback via BLE op wifi of
-  // Thread gezet. Vanaf hier is de iPhone alleen nog de koerier: Stulp doet
-  // zelf PASE, attestation, NOC/CASE en de inspectie van de endpoints.
-  func commissionMatter(onboardingPayload: String) async throws -> [PendingMatterDevice] {
-    let payload = onboardingPayload.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !payload.isEmpty else { throw StulpClientError.missingOnboardingPayload }
-
-    let pair = try await request(
-      "/api/stulp/pair",
-      method: "POST",
-      json: ["appId": Self.matterAppID, "driverId": Self.matterDriverID],
-      as: PairSession.self
-    )
-    guard pair.handlers.contains("commission"), pair.handlers.contains("commission_state"),
-      pair.handlers.contains("list_devices")
-    else {
-      try? await closePair(pair.id)
-      throw StulpClientError.incompatibleMatterApp
-    }
-    trace("pair \(pair.id) geopend, payload \(payload.count) tekens")
-
-    return try await withTaskCancellationHandler {
-      do {
-        let devices = try await performCommissioning(pairID: pair.id, payload: payload)
-        trace("pair \(pair.id) klaar: \(devices.count) apparaat/apparaten toegevoegd")
-        await closePairIgnoringCancellation(pair.id)
-        return devices
-      } catch {
-        trace("error", "pair \(pair.id) mislukt: \(error.localizedDescription)")
-        await closePairIgnoringCancellation(pair.id)
-        throw error
-      }
-    } onCancel: {
-      Task.detached { [self] in
-        try? await closePair(pair.id)
-      }
-    }
-  }
-
-  func configure(devices: [PendingMatterDevice], name: String, roomName: String?) async throws {
-    guard !devices.isEmpty else { return }
-    let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    // Een bridge kan meerdere echte Stulp-apparaten opleveren. Eén naam uit
-    // Apple's scherm over al die endpoints uitrollen zou hun bruikbare namen
-    // wissen; alleen een enkelvoudig resultaat neemt die naam daarom over.
-    if devices.count == 1, !cleanName.isEmpty, cleanName != devices[0].name {
-      _ = try await request(
-        "/api/manager/devices/device/\(escape(devices[0].id))",
-        method: "PUT",
-        json: ["name": cleanName],
-        as: AddedDevice.self
-      )
+    public init(connection: StulpConnection, logSource: String = "apple", session: URLSession? = nil) {
+        self.connection = connection
+        self.logSource = logSource
+        self.session = session ?? Self.shared
     }
 
-    guard let roomName, !roomName.isEmpty else { return }
-    let availableGroups = try await groups()
-    guard let group = availableGroups.first(where: { $0.name == roomName }) else { return }
-    for device in devices {
-      _ = try await request(
-        "/api/stulp/devices/\(escape(device.id))/group",
-        method: "PUT",
-        json: ["groupId": group.id],
-        as: AddedDevice.self
-      )
-    }
-  }
+    static let shared: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 25
+        configuration.timeoutIntervalForResource = 120
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
 
-  private func emit<T: Decodable>(
-    pairID: String,
-    event: String,
-    json: [String: String],
-    as type: T.Type
-  ) async throws -> T {
-    try await request(
-      "/api/stulp/pair/\(escape(pairID))/emit/\(escape(event))",
-      method: "POST",
-      json: json,
-      as: type
-    )
-  }
+    // MARK: - Requests
 
-  private func emitData(pairID: String, event: String, json: [String: String]?) async throws -> Data
-  {
-    let body = try json.map { try JSONSerialization.data(withJSONObject: $0) }
-    return try await requestData(
-      "/api/stulp/pair/\(escape(pairID))/emit/\(escape(event))",
-      method: "POST",
-      body: body,
-      contentType: body == nil ? nil : "application/json"
-    )
-  }
-
-  private func closePair(_ pairID: String) async throws {
-    _ = try await requestData("/api/stulp/pair/\(escape(pairID))", method: "DELETE")
-  }
-
-  private func performCommissioning(pairID: String, payload: String) async throws
-    -> [PendingMatterDevice]
-  {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: commissioningTimeout)
-    // Een enkel verzoek kan onderweg verloren gaan terwijl Stulp gewoon
-    // doorwerkt (14-10: een status-poll midden in PASE kreeg nooit antwoord).
-    // "commission" geeft bij een lopende sessie de lopende staat terug, dus
-    // herhalen is veilig; afbreken zou een geslaagde koppeling weggooien.
-    var state = try await emitRetrying(
-      pairID: pairID,
-      event: "commission",
-      json: ["code": payload, "address": ""],
-      deadline: deadline,
-      clock: clock
-    )
-    trace("commission gestuurd, running=\(state.running)")
-    while state.running {
-      try Task.checkCancellation()
-      guard clock.now < deadline else {
-        trace("warn", "commission_state nog running na \(Int(commissioningTimeout.components.seconds)) s")
-        throw StulpClientError.commissioningTimedOut
-      }
-      try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-      state = try await emitRetrying(
-        pairID: pairID,
-        event: "commission_state",
-        json: [:],
-        deadline: deadline,
-        clock: clock
-      )
-    }
-    trace("commission klaar: found=\(state.found ?? 0) warning=\(state.warning ?? "-")")
-    if let warning = state.warning, !warning.isEmpty {
-      throw StulpClientError.commissioningFailed(warning)
-    }
-    guard (state.found ?? 0) > 0 else {
-      throw StulpClientError.noDevicesFound
+    public func url(_ path: String) throws -> URL {
+        guard let url = URL(string: path, relativeTo: connection.baseURL)?.absoluteURL else {
+            throw StulpClientError.invalidResponse
+        }
+        return url
     }
 
-    let candidates = try await emitData(pairID: pairID, event: "list_devices", json: nil)
-    let objects = try candidateObjects(from: candidates)
-    trace("list_devices: \(objects.count) kandidaat/kandidaten")
-    guard !objects.isEmpty else { throw StulpClientError.noDevicesFound }
-
-    var devices: [PendingMatterDevice] = []
-    for object in objects {
-      let body = try JSONSerialization.data(withJSONObject: object)
-      devices.append(try await addCandidate(body).pending)
+    /// A request with the Bearer header, for callers that load themselves (images, streams).
+    public func request(_ path: String, method: String = "GET") throws -> URLRequest {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = method
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue(connection.authorization, forHTTPHeaderField: "Authorization")
+        return request
     }
-    return devices
-  }
 
-  private func emitRetrying(
-    pairID: String,
-    event: String,
-    json: [String: String],
-    deadline: ContinuousClock.Instant,
-    clock: ContinuousClock
-  ) async throws -> CommissionState {
-    var attempt = 0
-    while true {
-      do {
-        return try await emit(pairID: pairID, event: event, json: json, as: CommissionState.self)
-      } catch let error as URLError where error.code == .timedOut || error.code == .networkConnectionLost {
-        attempt += 1
-        trace("warn", "\(event) zonder antwoord (poging \(attempt)): \(error.localizedDescription)")
-        guard attempt < 4, clock.now < deadline else { throw error }
-        try Task.checkCancellation()
-      }
+    @discardableResult
+    public func send(
+        _ method: String, _ path: String, json: JSONValue? = nil, body: Data? = nil, contentType: String? = nil
+    ) async throws -> Data {
+        var request = try request(path, method: method)
+        if let json {
+            request.httpBody = try JSONEncoder().encode(json)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if let body {
+            request.httpBody = body
+            request.setValue(contentType ?? "application/octet-stream", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await session.data(for: request)
+        try Self.check(response, data: data)
+        return data
     }
-  }
 
-  private func addCandidate(_ body: Data) async throws -> AddedDevice {
-    var firstError: Error?
-    for attempt in 0..<2 {
-      do {
-        let added = try await requestData(
-          "/api/stulp/apps/\(Self.matterAppID)/drivers/\(Self.matterDriverID)/pair/devices",
-          method: "POST",
-          body: body,
-          contentType: "application/json"
-        )
-        let device = try decode(AddedDevice.self, from: added)
-        trace("toegevoegd: \(device.name) (\(device.id))")
-        return device
-      } catch {
-        trace("warn", "kandidaat toevoegen mislukt (poging \(attempt + 1)): \(error.localizedDescription)")
-        if attempt == 1 || !isRetryableCandidateError(error) { throw error }
-        firstError = error
-        try Task.checkCancellation()
-        try await Task.sleep(nanoseconds: candidateRetryDelayNanoseconds)
-      }
+    public func get<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
+        try Self.decode(type, from: try await send("GET", path))
     }
-    throw firstError ?? StulpClientError.invalidResponse
-  }
 
-  private func isRetryableCandidateError(_ error: Error) -> Bool {
-    if let urlError = error as? URLError {
-      return urlError.code != .cancelled
+    public func call<T: Decodable>(_ method: String, _ path: String, json: JSONValue? = nil, as type: T.Type = T.self) async throws -> T {
+        try Self.decode(type, from: try await send(method, path, json: json))
     }
-    if let clientError = error as? StulpClientError,
-      case .server(let status, _) = clientError
-    {
-      return status >= 500
+
+    static func check(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { throw StulpClientError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let server = try? JSONDecoder().decode(ServerError.self, from: data)
+            if http.statusCode == 401 { throw StulpClientError.unauthorized }
+            throw StulpClientError.server(status: http.statusCode, message: server?.message)
+        }
     }
-    return false
-  }
 
-  private func closePairIgnoringCancellation(_ pairID: String) async {
-    _ = await Task.detached { [self] in
-      try? await closePair(pairID)
-    }.value
-  }
-
-  private func authenticate() async throws {
-    if cookie != nil { return }
-    var request = URLRequest(url: connection.entryURL)
-    request.httpMethod = "GET"
-    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    let (data, response) = try await session.data(for: request)
-    let http = try checked(response: response, data: data, notFoundIsUnauthorized: true)
-    guard let setCookie = http.value(forHTTPHeaderField: "Set-Cookie"),
-      let proof = setCookie.split(separator: ";", maxSplits: 1).first,
-      proof.hasPrefix("stulp-session=")
-    else {
-      throw StulpClientError.missingSessionCookie
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw StulpClientError.invalidResponse
+        }
     }
-    cookie = String(proof)
-  }
 
-  private func request<T: Decodable>(
-    _ path: String,
-    method: String = "GET",
-    json: [String: String]? = nil,
-    as type: T.Type
-  ) async throws -> T {
-    let body = try json.map { try JSONSerialization.data(withJSONObject: $0) }
-    let data = try await requestData(
-      path,
-      method: method,
-      body: body,
-      contentType: body == nil ? nil : "application/json"
-    )
-    return try decode(type, from: data)
-  }
-
-  private func requestData(
-    _ path: String,
-    method: String = "GET",
-    body: Data? = nil,
-    contentType: String? = nil
-  ) async throws -> Data {
-    if cookie == nil { try await authenticate() }
-    guard let url = URL(string: path, relativeTo: connection.baseURL)?.absoluteURL else {
-      throw StulpClientError.invalidResponse
+    static func escape(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
-    var request = URLRequest(url: url)
-    request.httpMethod = method
-    request.httpBody = body
-    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    request.setValue(cookie, forHTTPHeaderField: "Cookie")
-    if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
-    let (data, response) = try await session.data(for: request)
-    _ = try checked(response: response, data: data)
-    return data
-  }
 
-  private func checked(
-    response: URLResponse,
-    data: Data,
-    notFoundIsUnauthorized: Bool = false
-  ) throws -> HTTPURLResponse {
-    guard let http = response as? HTTPURLResponse else { throw StulpClientError.invalidResponse }
-    guard (200..<300).contains(http.statusCode) else {
-      let server = (try? JSONDecoder().decode(ServerError.self, from: data))
-      if http.statusCode == 401 || (http.statusCode == 404 && notFoundIsUnauthorized) {
-        throw StulpClientError.unauthorized
-      }
-      throw StulpClientError.server(status: http.statusCode, message: server?.message)
+    // MARK: - System
+
+    public func validate() async throws -> StulpHealth {
+        try await get("/api/stulp/health")
     }
-    return http
-  }
 
-  private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
-    do { return try JSONDecoder().decode(type, from: data) } catch {
-      throw StulpClientError.invalidResponse
+    public func bootstrap() async throws -> Bootstrap {
+        try await get("/api/stulp/manage/bootstrap")
     }
-  }
 
-  private func candidateObjects(from data: Data) throws -> [[String: Any]] {
-    guard let objects = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-      throw StulpClientError.invalidResponse
+    public func system() async throws -> SystemSettings {
+        try await get("/api/stulp/system")
     }
-    return objects
-  }
 
-  private func escape(_ value: String) -> String {
-    value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
-  }
+    public func updateSystem(_ patch: JSONValue) async throws -> SystemSettings {
+        try await call("PUT", "/api/stulp/system", json: patch)
+    }
+
+    /// One line on the controller's console next to the plugin and request lines. Stulp stores
+    /// nothing; a failure here is never a reason to stop, so callers ignore it.
+    public func log(_ level: String, _ message: String) async throws {
+        try await send("POST", "/api/stulp/log", json: [
+            "source": .string(logSource), "level": .string(level), "message": .string(String(message.prefix(1000))),
+        ])
+    }
+
+    public func trace(_ message: String) { trace("info", message) }
+
+    public func trace(_ level: String, _ message: String) {
+        Task { try? await self.log(level, message) }
+    }
+
+    // MARK: - Devices
+
+    /// Every device, full (all capabilities with value, units and range in the house's units).
+    public func devices() async throws -> [Device] {
+        let map: [String: Device] = try await get("/api/manager/devices/device")
+        return Array(map.values)
+    }
+
+    public func device(_ id: String) async throws -> Device {
+        try await get("/api/manager/devices/device/\(Self.escape(id))")
+    }
+
+    /// The value is read in the house's units; Stulp converts it back for the device.
+    public func setCapability(device: String, capability: String, value: JSONValue) async throws {
+        try await send("PUT", "/api/manager/devices/device/\(Self.escape(device))/capability/\(Self.escape(capability))",
+                       json: ["value": value])
+    }
+
+    public func renameDevice(_ id: String, name: String) async throws -> Device {
+        try await call("PUT", "/api/manager/devices/device/\(Self.escape(id))", json: ["name": .string(name)])
+    }
+
+    public func deleteDevice(_ id: String) async throws {
+        try await send("DELETE", "/api/manager/devices/device/\(Self.escape(id))")
+    }
+
+    /// Only the changed keys; the driver hears about exactly those.
+    public func saveDeviceSettings(_ id: String, values: [String: JSONValue]) async throws -> Device {
+        try await call("PUT", "/api/manager/devices/device/\(Self.escape(id))/settings", json: .object(values))
+    }
+
+    public func moveDevice(_ id: String, toGroup group: String?) async throws -> Device {
+        try await call("PUT", "/api/stulp/devices/\(Self.escape(id))/group", json: ["groupId": .string(group ?? "")])
+    }
+
+    /// The complete order of one group's devices.
+    public func orderDevices(group: String?, ids: [String]) async throws {
+        try await send("PUT", "/api/stulp/devices/order", json: [
+            "groupId": .string(group ?? ""), "deviceIds": .array(ids.map { .string($0) }),
+        ])
+    }
+
+    public func media(_ device: String) async throws -> [MediaSource] {
+        try await get("/api/stulp/devices/\(Self.escape(device))/media")
+    }
+
+    public func mediaPath(device: String, slot: String, kind: String) -> String {
+        "/api/stulp/devices/\(Self.escape(device))/media/\(Self.escape(slot))/stream?kind=\(kind)"
+    }
+
+    public func still(device: String, slot: String) async throws -> Data {
+        try await send("GET", mediaPath(device: device, slot: slot, kind: "image"))
+    }
+
+    // MARK: - Groups
+
+    public func groups() async throws -> [DeviceGroup] {
+        try await get("/api/stulp/device-groups")
+    }
+
+    public func createGroup(name: String, parentId: String?) async throws -> DeviceGroup {
+        try await call("POST", "/api/stulp/device-groups", json: ["name": .string(name), "parentId": .string(parentId ?? "")])
+    }
+
+    public func updateGroup(_ id: String, _ fields: JSONValue) async throws -> DeviceGroup {
+        try await call("PUT", "/api/stulp/device-groups/\(Self.escape(id))", json: fields)
+    }
+
+    public func deleteGroup(_ id: String) async throws {
+        try await send("DELETE", "/api/stulp/device-groups/\(Self.escape(id))")
+    }
+
+    // MARK: - Scenes
+
+    public func scenes() async throws -> [StulpScene] {
+        try await get("/api/stulp/scenes")
+    }
+
+    public func saveScene(_ scene: StulpScene) async throws -> StulpScene {
+        let body: JSONValue = [
+            "name": .string(scene.name), "kind": .string(scene.kind),
+            "states": .array(scene.states.map { ["deviceId": .string($0.deviceId), "capabilityId": .string($0.capabilityId), "value": $0.value] }),
+        ]
+        if scene.id.isEmpty { return try await call("POST", "/api/stulp/scenes", json: body) }
+        return try await call("PUT", "/api/stulp/scenes/\(Self.escape(scene.id))", json: body)
+    }
+
+    public func deleteScene(_ id: String) async throws {
+        try await send("DELETE", "/api/stulp/scenes/\(Self.escape(id))")
+    }
+
+    // MARK: - Flows
+
+    public func flows() async throws -> [Flow] {
+        let map: [String: Flow] = try await get("/api/manager/flow/flow")
+        return Array(map.values)
+    }
+
+    public func saveFlow(_ flow: Flow) async throws -> Flow {
+        if flow.id.isEmpty { return try await call("POST", "/api/manager/flow/flow", json: flow.body) }
+        return try await call("PUT", "/api/manager/flow/flow/\(Self.escape(flow.id))", json: flow.body)
+    }
+
+    public func deleteFlow(_ id: String) async throws {
+        try await send("DELETE", "/api/manager/flow/flow/\(Self.escape(id))")
+    }
+
+    public func setFlowEnabled(_ id: String, _ enabled: Bool) async throws {
+        try await send("PUT", "/api/manager/flow/flow/\(Self.escape(id))/enabled", json: ["enabled": .bool(enabled)])
+    }
+
+    public func runFlow(_ id: String) async throws -> FlowRunResult {
+        try await call("POST", "/api/stulp/flows/\(Self.escape(id))/run")
+    }
+
+    public func cards() async throws -> FlowCardCatalog {
+        try await get("/api/stulp/flow/cards")
+    }
+
+    public func autocomplete(card: FlowCard, argument: String, query: String, args: [String: JSONValue]) async throws -> [AutocompleteItem] {
+        let value: JSONValue = try await call("POST", "/api/stulp/flow/autocomplete", json: [
+            "appId": .string(card.appId), "cardType": .string(card.type.rawValue), "cardId": .string(card.cardId),
+            "argument": .string(argument), "query": .string(query), "args": .object(args),
+        ])
+        return (value.array ?? []).map { AutocompleteItem(raw: $0) }
+    }
+
+    // MARK: - Apps and drivers
+
+    public func apps() async throws -> [StulpAppInfo] {
+        let map: [String: StulpAppInfo] = try await get("/api/manager/apps/app")
+        return Array(map.values)
+    }
+
+    public func setAppEnabled(_ id: String, _ enabled: Bool) async throws {
+        try await send("PUT", "/api/manager/apps/app/\(Self.escape(id))/\(enabled ? "enable" : "disable")")
+    }
+
+    public func restartApp(_ id: String) async throws {
+        try await send("POST", "/api/manager/apps/app/\(Self.escape(id))/restart")
+    }
+
+    /// Uninstalls an app, or refuses one that only announced itself.
+    public func removeApp(_ id: String) async throws {
+        try await send("DELETE", "/api/manager/apps/app/\(Self.escape(id))")
+    }
+
+    /// Accepting an app that announced itself: the one act a program cannot do for itself.
+    public func installApp(_ id: String) async throws {
+        try await send("POST", "/api/stulp/apps/\(Self.escape(id))/install")
+    }
+
+    public func appSetting(_ app: String, _ name: String) async throws -> JSONValue {
+        do {
+            return try await get("/api/manager/apps/app/\(Self.escape(app))/setting/\(Self.escape(name))")
+        } catch StulpClientError.server(404, _) {
+            return .null
+        }
+    }
+
+    public func setAppSetting(_ app: String, _ name: String, _ value: JSONValue) async throws {
+        try await send("PUT", "/api/manager/apps/app/\(Self.escape(app))/setting/\(Self.escape(name))", json: ["value": value])
+    }
+
+    public func unsetAppSetting(_ app: String, _ name: String) async throws {
+        try await send("DELETE", "/api/manager/apps/app/\(Self.escape(app))/setting/\(Self.escape(name))")
+    }
+
+    /// An app's own API (`api` routes in its manifest). `path` may carry a query.
+    public func appAPI(_ app: String, method: String, path: String, body: JSONValue?) async throws -> JSONValue {
+        let clean = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let data = try await send(method.uppercased(), "/api/stulp/apps/\(Self.escape(app))/api/\(clean)",
+                                  json: method.uppercased() == "GET" ? nil : (body ?? .null))
+        return data.isEmpty ? .null : try Self.decode(JSONValue.self, from: data)
+    }
+
+    public func drivers() async throws -> [Driver] {
+        let value: JSONValue = try await get("/api/manager/drivers/driver")
+        // A map keyed by id (Stulp's shape), tolerated as an array too.
+        let items = value.object.map { Array($0.values) } ?? value.array ?? []
+        let data = try JSONEncoder().encode(JSONValue.array(items))
+        return try Self.decode([Driver].self, from: data)
+    }
+
+    public func driver(_ id: String) async throws -> Driver {
+        try await get("/api/manager/drivers/driver/\(id.split(separator: ":").map { Self.escape(String($0)) }.joined(separator: ":"))")
+    }
+
+    // MARK: - Pairing
+
+    public func openPair(app: String, driver: String) async throws -> PairSession {
+        try await call("POST", "/api/stulp/pair", json: ["appId": .string(app), "driverId": .string(driver)])
+    }
+
+    public func emit(pair: String, event: String, data: JSONValue = .null) async throws -> JSONValue {
+        let raw = try await send("POST", "/api/stulp/pair/\(Self.escape(pair))/emit/\(Self.escape(event))", json: data)
+        return raw.isEmpty ? .null : try Self.decode(JSONValue.self, from: raw)
+    }
+
+    public func closePair(_ id: String) async throws {
+        try await send("DELETE", "/api/stulp/pair/\(Self.escape(id))")
+    }
+
+    /// Adds a candidate a driver offered (`list_devices`) and answers with the new device.
+    public func addDevice(app: String, driver: String, candidate: JSONValue) async throws -> Device {
+        try await call("POST", "/api/stulp/apps/\(Self.escape(app))/drivers/\(Self.escape(driver))/pair/devices", json: candidate)
+    }
+
+    // MARK: - Notifications
+
+    public func notifications() async throws -> [StulpNotification] {
+        try await get("/api/manager/notifications/notification")
+    }
+
+    public func deleteNotification(_ id: String) async throws {
+        try await send("DELETE", "/api/manager/notifications/notification/\(Self.escape(id))")
+    }
+
+    // MARK: - Backup
+
+    /// The whole document plus every installed app bundle, as a ZIP in a temporary file.
+    public func downloadBackup() async throws -> URL {
+        let (file, response) = try await session.download(for: try request("/api/stulp/backup"))
+        try Self.check(response, data: Data())
+        let date = Date().formatted(.iso8601.year().month().day())
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("stulp-backup-\(date).zip")
+        try? FileManager.default.removeItem(at: target)
+        try FileManager.default.moveItem(at: file, to: target)
+        return target
+    }
+
+    public func restore(zip: Data) async throws {
+        var request = try request("/api/stulp/restore", method: "POST")
+        request.setValue("application/zip", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 300
+        let (data, response) = try await session.upload(for: request, from: zip)
+        try Self.check(response, data: data)
+    }
+
+    // MARK: - This phone (com.stulp.notify)
+
+    /// The phone devices of the notifications app, to point this device at.
+    public func phones() async throws -> [Device] {
+        try await devices()
+            .filter(\.isPhone)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Creates this app's own phone device in Stulp. `installation` is fixed per installation, so
+    /// registering again returns the same device.
+    public func registerPhone(name: String, installation: String) async throws -> Device {
+        try await addDevice(app: "com.stulp.notify", driver: "phone", candidate: [
+            "name": .string(name), "data": ["kind": "app", "installation": .string(installation)],
+        ])
+    }
+
+    /// This app's APNs token for this device; Stulp sends there.
+    public func registerPush(deviceId: String, token: String, environment: String) async throws {
+        _ = try await appAPI("com.stulp.notify", method: "POST", path: "register_push", body: [
+            "deviceId": .string(deviceId), "token": .string(token), "environment": .string(environment),
+        ])
+    }
+
+    /// Reports what the phone knows (charger, home) on its device.
+    public func report(deviceId: String, values: [String: Bool]) async throws {
+        _ = try await appAPI("com.stulp.notify", method: "POST", path: "report", body: [
+            "deviceId": .string(deviceId), "values": .object(values.mapValues { .bool($0) }),
+        ])
+    }
+
+    public func testNotification(deviceId: String) async throws {
+        _ = try await appAPI("com.stulp.notify", method: "POST", path: "test", body: ["deviceId": .string(deviceId)])
+    }
 }
 
-struct StulpHealth: Decodable, Equatable, Sendable {
-  let ok: Bool
-  let stulpVersion: String
-}
+struct ServerError: Decodable, Sendable {
+    let error: String?
+    let errorDescription: String?
 
-struct StulpPhone: Decodable, Equatable, Sendable, Identifiable {
-  let id: String
-  let name: String
-  let appId: String
-}
-
-struct StulpDeviceGroup: Decodable, Equatable, Sendable {
-  let id: String
-  let name: String
-  let parentId: String?
-}
-
-private struct PairSession: Decodable, Sendable {
-  let id: String
-  let handlers: [String]
-}
-
-private struct CommissionState: Decodable, Sendable {
-  let running: Bool
-  let warning: String?
-  /// Stulp zet `found` bij succes op het aantal gevonden apparaten. Een ouder
-  /// voorstel had hier een object; beide vormen worden gelezen.
-  let found: Int?
-
-  private enum CodingKeys: String, CodingKey { case running, warning, found }
-  private struct Legacy: Decodable { let found: Int }
-
-  init(from decoder: Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    running = try c.decode(Bool.self, forKey: .running)
-    warning = try c.decodeIfPresent(String.self, forKey: .warning)
-    if let n = try? c.decodeIfPresent(Int.self, forKey: .found) {
-      found = n
-    } else {
-      found = try c.decodeIfPresent(Legacy.self, forKey: .found)?.found
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
     }
-  }
+
+    var message: String? { errorDescription ?? error }
 }
 
-private struct AddedDevice: Decodable, Sendable {
-  let id: String
-  let name: String
+public enum StulpClientError: LocalizedError, Equatable {
+    case unauthorized
+    case invalidResponse
+    case missingOnboardingPayload
+    case incompatibleMatterApp
+    case noDevicesFound
+    case commissioningTimedOut
+    case commissioningFailed(String)
+    case server(status: Int, message: String?)
 
-  var pending: PendingMatterDevice { PendingMatterDevice(id: id, name: name) }
-}
-
-private struct ServerError: Decodable, Sendable {
-  let error: String?
-  let errorDescription: String?
-
-  enum CodingKeys: String, CodingKey {
-    case error
-    case errorDescription = "error_description"
-  }
-
-  var message: String? { errorDescription ?? error }
-}
-
-enum StulpClientError: LocalizedError, Equatable {
-  case unauthorized
-  case missingSessionCookie
-  case invalidResponse
-  case missingOnboardingPayload
-  case incompatibleMatterApp
-  case noDevicesFound
-  case commissioningTimedOut
-  case commissioningFailed(String)
-  case server(status: Int, message: String?)
-
-  var errorDescription: String? {
-    switch self {
-    case .unauthorized:
-      "Stulp wees deze Manage-link af. Controleer het adres en de sleutel."
-    case .missingSessionCookie:
-      "De server gaf geen Stulp-sessie terug. Gebruik de volledige Manage-link."
-    case .invalidResponse:
-      "Stulp gaf een antwoord dat deze app niet begrijpt."
-    case .missingOnboardingPayload:
-      "iOS gaf geen Matter-koppelcode terug."
-    case .incompatibleMatterApp:
-      "De draaiende Matter-app ondersteunt deze iOS-koppeling nog niet."
-    case .noDevicesFound:
-      "Matter is gekoppeld, maar er kwam geen apparaat terug om toe te voegen."
-    case .commissioningTimedOut:
-      "Stulp kreeg niet binnen 3 minuten en 15 seconden antwoord van het Matter-apparaat."
-    case .commissioningFailed(let message):
-      message
-    case .server(let status, let message):
-      message ?? "Stulp gaf HTTP \(status)."
+    public var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            "Stulp wees de toegangssleutel af. Controleer het adres en de sleutel."
+        case .invalidResponse:
+            "Stulp gaf een antwoord dat deze app niet begrijpt."
+        case .missingOnboardingPayload:
+            "iOS gaf geen Matter-koppelcode terug."
+        case .incompatibleMatterApp:
+            "De draaiende Matter-app ondersteunt deze iOS-koppeling nog niet."
+        case .noDevicesFound:
+            "Matter is gekoppeld, maar er kwam geen apparaat terug om toe te voegen."
+        case .commissioningTimedOut:
+            "Stulp kreeg niet binnen 3 minuten en 15 seconden antwoord van het Matter-apparaat."
+        case .commissioningFailed(let message):
+            message
+        case .server(let status, let message):
+            message ?? "Stulp gaf HTTP \(status)."
+        }
     }
-  }
 }

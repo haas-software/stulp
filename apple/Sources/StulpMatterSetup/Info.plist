@@ -39,10 +39,10 @@
 		<string>$(PRODUCT_MODULE_NAME).MatterRequestHandler</string>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen controller toe te voegen.</string>
+	<string>Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen Stulp toe te voegen.</string>
 	<key>StulpAppGroup</key>
-	<string>group.software.haas.stulp</string>
+	<string>$(STULP_APP_GROUP)</string>
 	<key>StulpKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)software.haas.stulp.shared</string>
+	<string>$(STULP_KEYCHAIN_GROUP)</string>
 </dict>
 </plist>

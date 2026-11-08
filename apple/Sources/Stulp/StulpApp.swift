@@ -1,24 +1,62 @@
+import StulpKit
 import SwiftUI
 
 @main
 struct StulpApp: App {
-  @UIApplicationDelegateAdaptor(StulpAppDelegate.self) private var delegate
-  @StateObject private var model = StulpAppModel()
+    static let mainWindowID = "main"
 
-  init() {
-    // iOS wekt de app op de achtergrond voor een thuis/weg-overgang; de
-    // geofence moet dan direct weer luisteren om het event te ontvangen.
-    PresenceMonitor.shared.start()
-    PushCenter.shared.start()
-  }
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(StulpAppDelegate.self) private var delegate
+    #endif
+    @State private var model = HomeModel(demo: DebugLaunch.demo)
 
-  var body: some Scene {
-    WindowGroup {
-      ContentView(model: model)
-        // Manage is altijd donker; de app volgt dat, zodat web en native
-        // één geheel zijn in plaats van een witte balk boven een zwarte pagina.
-        .preferredColorScheme(.dark)
-        .tint(Color.accentColor)
+    init() {
+        #if os(iOS)
+        // iOS wakes the app in the background for a home/away crossing; the geofence must listen
+        // again at once to receive the event.
+        PresenceMonitor.shared.start()
+        PushCenter.shared.start()
+        #endif
     }
-  }
+
+    var body: some Scene {
+        WindowGroup(id: Self.mainWindowID) {
+            RootView()
+                .environment(model)
+                #if os(macOS)
+                .frame(minWidth: 760, minHeight: 520)
+                #endif
+        }
+        #if os(macOS)
+        .defaultSize(width: 1080, height: 720)
+        .commands { StulpCommands(model: model) }
+        #endif
+
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(model)
+                .frame(minWidth: 520, idealWidth: 600, minHeight: 520, idealHeight: 680)
+        }
+        #endif
+    }
 }
+
+#if os(macOS)
+/// The menu bar: add a device (⌘N), reload (⌘R).
+struct StulpCommands: Commands {
+    let model: HomeModel
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Apparaat toevoegen…") { model.addingDevice = true }
+                .keyboardShortcut("n")
+                .disabled(!model.isConfigured)
+            Divider()
+            Button("Vernieuw") { Task { await model.reloadDevices() } }
+                .keyboardShortcut("r")
+                .disabled(!model.isConfigured)
+        }
+    }
+}
+#endif

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Bouwt een gesigneerde Stulp.ipa voor een eigen iPhone of iPad.
 #
-#   ./build-ipa.sh                 archiveert en exporteert naar build/Stulp.ipa
-#   ./build-ipa.sh install [id]    bouwt tegen het gekoppelde toestel en installeert
+#   tools/build-ipa.sh                 archiveert en exporteert naar build/Stulp.ipa
+#   tools/build-ipa.sh install [id]    bouwt tegen het gekoppelde toestel en installeert
 #
 # Development-signing via het team in project.yml; Xcode registreert zelf de
 # App IDs, de app group en de Matter-entitlement. Een toestel komt alleen in
@@ -11,7 +11,7 @@
 # gekoppelde iPhone (kabel, 'Vertrouw') met Ontwikkelaarsmodus aan.
 set -eu
 set -o pipefail
-cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p build
 
 stulp_destination='generic/platform=iOS'
@@ -34,7 +34,7 @@ if len(ready) != 1:
             d["connectionProperties"].get("pairingState"),
             d["connectionProperties"].get("tunnelState")), file=sys.stderr)
     print("  sluit de iPhone met een kabel aan, ontgrendel hem en tik op 'Vertrouw';"
-          " of geef het identifier mee: ./build-ipa.sh install <id>", file=sys.stderr)
+          " of geef het identifier mee: tools/build-ipa.sh install <id>", file=sys.stderr)
     sys.exit(1)
 print(ready[0]["identifier"], ready[0]["hardwareProperties"]["udid"])
 PY
@@ -44,7 +44,7 @@ PY
     stulp_destination="platform=iOS,id=$stulp_udid"
 fi
 
-xcodegen generate
+xcodegen generate --quiet
 if [ -n "$stulp_device" ]; then
     # Alleen een gewone build tegen het toestel zet zijn UDID in het profiel;
     # de archive-actie registreert niets en valt stil terug op 'generic'.
@@ -58,7 +58,7 @@ xcodebuild -project Stulp.xcodeproj -scheme Stulp -configuration Release \
     -allowProvisioningUpdates \
     -archivePath build/Stulp.xcarchive archive | grep -E "error|warning: .*(sign|provision)|\*\* "
 xcodebuild -exportArchive -archivePath build/Stulp.xcarchive \
-    -exportOptionsPlist ExportOptions.plist -exportPath build \
+    -exportOptionsPlist tools/ExportOptions.plist -exportPath build \
     -allowProvisioningUpdates | grep -E "error|EXPORT"
 echo "build/Stulp.ipa ($(( $(wc -c < build/Stulp.ipa) / 1024 )) kB)"
 

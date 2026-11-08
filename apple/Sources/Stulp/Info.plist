@@ -22,8 +22,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -36,28 +34,14 @@
 		<string>_matterd._udp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Stulp gebruikt je lokale netwerk om het nieuwe Matter-apparaat rechtstreeks aan je eigen controller toe te voegen.</string>
+	<string>Stulp verbindt met je eigen Stulp in het lokale netwerk en voegt Matter-apparaten daar rechtstreeks aan toe.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Stulp meldt aan je eigen controller wanneer je thuiskomt of weggaat, ook als de app niet open is. Je locatie zelf gaat nergens heen.</string>
+	<string>Stulp meldt aan je eigen Stulp wanneer je thuiskomt of weggaat, ook als de app niet open is. Je locatie zelf gaat nergens heen.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Stulp gebruikt je locatie om je thuis in te stellen.</string>
 	<key>StulpAppGroup</key>
-	<string>group.software.haas.stulp</string>
+	<string>$(STULP_APP_GROUP)</string>
 	<key>StulpKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)software.haas.stulp.shared</string>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
+	<string>$(STULP_KEYCHAIN_GROUP)</string>
 </dict>
 </plist>

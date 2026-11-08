@@ -1,4 +1,5 @@
 import MatterSupport
+import StulpKit
 import os
 
 final class MatterRequestHandler: MatterAddDeviceExtensionRequestHandler {
@@ -57,8 +58,9 @@ final class MatterRequestHandler: MatterAddDeviceExtensionRequestHandler {
     note("commissionDevice: iOS draagt over, payload \(onboardingPayload.count) tekens, prefix \(onboardingPayload.prefix(3))")
     do {
       try PendingMatterDevices.remove()
-      let devices = try await StulpClient(connection: connection, logSource: "ios-matter")
-        .commissionMatter(onboardingPayload: onboardingPayload)
+      let client = StulpClient(connection: connection, logSource: "ios-matter")
+      let devices = try await MatterCommissioning(client: client)
+        .commission(onboardingPayload: onboardingPayload)
       MatterProgress.record("Stulp heeft \(devices.count) apparaat/apparaten toegevoegd")
       try PendingMatterDevices.save(devices)
       logger.info("Matter commissioning added \(devices.count, privacy: .public) Stulp device(s)")
@@ -93,7 +95,7 @@ final class MatterRequestHandler: MatterAddDeviceExtensionRequestHandler {
       let connection = try? SharedStulpConfiguration.load()
     else { return }
     do {
-      try await StulpClient(connection: connection)
+      try await MatterCommissioning(client: StulpClient(connection: connection, logSource: "ios-matter"))
         .configure(devices: devices, name: name, roomName: room?.displayName)
     } catch {
       // Het apparaat en Stulps fabric zijn dan al veilig gekoppeld. Naam
@@ -111,7 +113,7 @@ private enum MatterSetupError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .notConfigured:
-      "Open Stulp eerst en verbind de app met je Manage-link."
+      "Open Stulp eerst en verbind de app met je Stulp."
     }
   }
 }

@@ -28,6 +28,6 @@
 		<string>$(PRODUCT_MODULE_NAME).NotificationService</string>
 	</dict>
 	<key>StulpAppGroup</key>
-	<string>group.software.haas.stulp</string>
+	<string>$(STULP_APP_GROUP)</string>
 </dict>
 </plist>
