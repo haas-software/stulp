@@ -80,5 +80,5 @@ codegen-units = 1
 debug = true
 
 # Hop's types op dezelfde tag, met wijzigen ter plekke (vendor/PROVENANCE.md).
-[patch."https://github.com/xinix00/hop.git"]
+[patch."https://github.com/hop-os/hop.git"]
 types = { path = "vendor/types" }

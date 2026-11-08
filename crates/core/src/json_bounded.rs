@@ -1,5 +1,5 @@
 //! Dezelfde Hop-parser met een expliciete grens voor documenten en appframes.
-// Afgeleid van xinix00/hop v3.0.0-alpha.10, commit 998ebdc, types/src/json.rs.
+// Afgeleid van hop-os/hop v3.0.0-alpha.10, commit 998ebdc, types/src/json.rs.
 // Oorspronkelijke MIT-licentie met Commons Clause staat in HOP-LICENSE.
 // Aanpassingen: caller-grens en openbare Object::push in plaats van het private pairs-veld.
 use alloc::{string::String, vec::Vec};

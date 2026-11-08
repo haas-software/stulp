@@ -8,9 +8,9 @@ license.workspace = true
 [dependencies]
 stulp-core = { path = "../core" }
 stulp-protocol = { path = "../protocol" }
-leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leancrypto = { git = "https://github.com/haas-software/lean.git", tag = "v3.2.0-rc3" }
 # De Mux van de REST-tabel (src/api.rs); dezelfde tag als de rest van lean.
-leanhttp = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leanhttp = { git = "https://github.com/haas-software/lean.git", tag = "v3.2.0-rc3" }
 
 [lints]
 workspace = true

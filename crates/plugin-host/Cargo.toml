@@ -14,8 +14,8 @@ stulp-core = { path = "../core" }
 stulp-protocol = { path = "../protocol" }
 stulp-device-tls = { path = "../device-tls" }
 
-leanhttp = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3", features = ["std"] }
-leanhttps = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leanhttp = { git = "https://github.com/haas-software/lean.git", tag = "v3.2.0-rc3", features = ["std"] }
+leanhttps = { git = "https://github.com/haas-software/lean.git", tag = "v3.2.0-rc3" }
 
 [lints]
 workspace = true

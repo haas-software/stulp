@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-leancrypto = { git = "https://github.com/xinix00/lean.git", tag = "v3.2.0-rc3" }
+leancrypto = { git = "https://github.com/haas-software/lean.git", tag = "v3.2.0-rc3" }
 stulp-protocol = { path = "../../crates/protocol" }
 stulp-sdk = { path = "../../crates/sdk" }
 stulp-core = { path = "../../crates/core" }
