@@ -91,7 +91,7 @@ struct RootView: View {
     private var tabs: some View {
         TabView(selection: $tab) {
             Tab("Thuis", systemImage: "house.fill", value: AppTab.home) {
-                NavigationStack { HomeView() }
+                NavigationStack { HomeView(isTab: true) }
             }
             // The system tab bar keeps a tab's label and place for as long as its identity stays
             // the same, so a new order (or name, or icon) never showed. Each location tab's
@@ -101,7 +101,7 @@ struct RootView: View {
             let signature = locations.map { "\($0.id):\($0.name):\(RoomSymbol.symbol($0))" }.joined(separator: "|")
             ForEach(locations.map { (key: "\($0.id)#\(signature)", group: $0) }, id: \.key) { entry in
                 Tab(entry.group.name, systemImage: RoomSymbol.symbol(entry.group), value: AppTab.room(entry.group.id)) {
-                    NavigationStack { RoomView(groupID: entry.group.id, isTab: true) }
+                    NavigationStack { HomeView(scope: entry.group.id, isTab: true) }
                 }
             }
             // Only with a sidebar (iPad, an open Duo); on an iPhone they are in the menu at the top,
@@ -176,7 +176,7 @@ private struct MacRootView: View {
                 switch tab {
                 case .home: NavigationStack { HomeView() }
                 case .category(let category): NavigationStack { CategoryView(category: category) }
-                case .room(let id): NavigationStack { RoomView(groupID: id) }
+                case .room(let id): NavigationStack { HomeView(scope: id) }
                 case .automations: NavigationStack { FlowsView() }
                 case .notifications: NavigationStack { NotificationsView() }
                 case .apps: NavigationStack { AppsView() }

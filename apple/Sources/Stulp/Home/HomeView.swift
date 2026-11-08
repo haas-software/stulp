@@ -1,16 +1,30 @@
 import StulpKit
 import SwiftUI
 
-/// Where Home pushes to from the overview.
+/// Where an overview pushes to.
 enum HomeRoute: Hashable {
-    case category(DevicePresentation.Category)
+    /// A category, within the overview's scope (nil: the whole house).
+    case category(DevicePresentation.Category, scope: String?)
     case room(String)
 }
 
 /// The overview, laid out as Home's: the categories with their summary on top, then scenes,
-/// cameras, and every room with its tiles.
+/// cameras, and every room with its tiles. The same page serves the whole house (Thuis), a
+/// location in the tab bar (Beneden: its scenes, its cameras, its rooms, also those a level or more
+/// down) and a room you tap. The bar carries no title; what stays in
+/// sight is the room you are in, as a capsule at the top. Every title is such a capsule.
 struct HomeView: View {
     @Environment(HomeModel.self) private var model
+    /// The location or room this page covers; nil is the whole house.
+    var scope: String? = nil
+    /// A tab's first screen: it carries the menu at the top.
+    var isTab = false
+    @State private var editingRoom = false
+
+    private var title: String {
+        guard let scope else { return "Thuis" }
+        return model.group(scope)?.name ?? "Ruimte"
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -19,7 +33,9 @@ struct HomeView: View {
                     if !model.loaded {
                         ProgressView("Stulp laden…")
                             .frame(maxWidth: .infinity, minHeight: 240)
-                    } else if model.visibleDevices.isEmpty {
+                    } else if scope != nil, model.group(scope) == nil {
+                        ContentUnavailableView("Ruimte niet gevonden", systemImage: "questionmark.square.dashed")
+                    } else if model.devices(scope: scope).isEmpty {
                         empty
                     } else {
                         content
@@ -30,35 +46,67 @@ struct HomeView: View {
                 .frame(maxWidth: 1100)
                 .frame(maxWidth: .infinity)
             }
-            .navigationTitle("Thuis")
             .task(id: model.loaded) {
                 // `-stulpScrollTo Keuken`: start scrolled to that heading, for screenshots.
-                if model.loaded, let heading = DebugLaunch.scrollTo {
+                if model.loaded, scope == nil, let heading = DebugLaunch.scrollTo {
                     try? await Task.sleep(for: .milliseconds(300))
                     proxy.scrollTo(SectionTitle<HomeRoute>.scrollID(heading), anchor: .top)
                 }
             }
         }
         .background(HomeBackground())
-        .largeTitle()
+        .pageTitle(title)
         .navigationDestination(for: HomeRoute.self) { route in
             switch route {
-            case .category(let category): CategoryView(category: category)
-            case .room(let id): RoomView(groupID: id)
+            case .category(let category, let scope): CategoryView(category: category, scope: scope)
+            case .room(let id): HomeView(scope: id)
             }
         }
-        .toolbar { HomeToolbar() }
-        .mainMenu()
+        .toolbar {
+            HomeToolbar()
+            if scope != nil {
+                ToolbarItem(placement: .trailingBar) {
+                    Button("Ruimte-instellingen", systemImage: "slider.horizontal.3") { editingRoom = true }
+                }
+            }
+        }
+        .sheet(isPresented: $editingRoom) {
+            if let scope {
+                NavigationStack { RoomEditor(groupID: scope) }
+                    .environment(model)
+            }
+        }
+        .modifier(TabMenu(active: isTab))
         .refreshable { await model.reloadDevices() }
     }
 
     @ViewBuilder private var content: some View {
-        #if os(iOS)
-        ConnectionFooter()
-        #endif
-        CategoryStrip()
+        if let scope, let place = model.group(scope) {
+            // Every title is a capsule that scrolls along, the page's too: the place itself first,
+            // over its categories and its own devices, until the next capsule pushes it away.
+            Section {
+                #if os(iOS)
+                ConnectionFooter()
+                #endif
+                CategoryStrip(scope: scope)
+                let own = tiles(model.devices(in: scope))
+                if !own.isEmpty { TileGrid(devices: own) }
+            } header: {
+                SectionTitle<HomeRoute>(title: place.name, subtitle: place.parentId.map { model.path(of: $0) })
+            }
+        } else {
+            Section {
+                #if os(iOS)
+                ConnectionFooter()
+                #endif
+                CategoryStrip(scope: nil)
+            } header: {
+                SectionTitle<HomeRoute>(title: "Thuis")
+            }
+        }
 
-        let scenes = model.sceneDevices
+        let all = model.devices(scope: scope)
+        let scenes = all.filter(\.isScene)
         if !scenes.isEmpty {
             Section {
                 TileGrid(devices: scenes, tapToggles: true)
@@ -67,7 +115,7 @@ struct HomeView: View {
             }
         }
 
-        let cameras = model.cameras
+        let cameras = all.filter(Self.isCamera)
         if !cameras.isEmpty {
             Section {
                 CameraStrip(cameras: cameras)
@@ -76,34 +124,51 @@ struct HomeView: View {
             }
         }
 
-        ForEach(model.roomTree, id: \.group.id) { entry in
+        ForEach(model.rooms(scope: scope).filter { $0.group.id != scope }, id: \.group.id) { entry in
             let devices = tiles(model.devices(in: entry.group.id))
             if !devices.isEmpty {
-                // The room by name, its location (the tab it lives under) small beside it.
                 Section {
                     TileGrid(devices: devices)
                 } header: {
-                    SectionTitle(
-                        title: entry.depth == 0 ? entry.group.name : pathBelowRoot(entry.group),
-                        subtitle: entry.depth == 0 ? nil : model.group(rootID(entry.group))?.name,
-                        destination: HomeRoute.room(entry.group.id))
+                    heading(entry.group, depth: entry.depth)
                 }
             }
         }
 
-        let loose = tiles(model.devices(in: nil))
-        if !loose.isEmpty {
-            Section {
-                TileGrid(devices: loose)
-            } header: {
-                SectionTitle<HomeRoute>(title: "Overig")
+        if scope == nil {
+            let loose = tiles(model.devices(in: nil))
+            if !loose.isEmpty {
+                Section {
+                    TileGrid(devices: loose)
+                } header: {
+                    SectionTitle<HomeRoute>(title: "Overig")
+                }
             }
         }
     }
 
+    /// In the whole house: the room by name with its location (the tab it lives under) beside it.
+    /// Within a location: the room's path below that location. The page's own room has no link.
+    private func heading(_ group: DeviceGroup, depth: Int) -> SectionTitle<HomeRoute> {
+        if let scope {
+            let base = model.path(of: scope)
+            let path = model.path(of: group.id)
+            let title = path.hasPrefix(base + " › ") ? String(path.dropFirst(base.count + 3)) : group.name
+            return SectionTitle(title: title, destination: group.id == scope ? nil : HomeRoute.room(group.id))
+        }
+        return SectionTitle(
+            title: depth == 0 ? group.name : pathBelowRoot(group),
+            subtitle: depth == 0 ? nil : model.group(rootID(group))?.name,
+            destination: HomeRoute.room(group.id))
+    }
+
+    static func isCamera(_ device: Device) -> Bool {
+        device.deviceClass == "camera" || device.deviceClass == "doorbell"
+    }
+
     /// Scenes and cameras have their own rows above.
     private func tiles(_ devices: [Device]) -> [Device] {
-        devices.filter { !$0.isScene && $0.deviceClass != "camera" && $0.deviceClass != "doorbell" }
+        devices.filter { !$0.isScene && !Self.isCamera($0) }
     }
 
     /// "Woonkamer › Bank" for Beneden › Woonkamer › Bank: the location is already the subtitle.
@@ -119,16 +184,62 @@ struct HomeView: View {
         return current.id
     }
 
-    private var empty: some View {
-        ContentUnavailableView {
-            Label("Nog geen apparaten", systemImage: "house")
-        } description: {
-            Text("Voeg een apparaat toe uit een van je apps, of een Matter-apparaat met zijn code.")
-        } actions: {
-            Button("Apparaat toevoegen") { model.addingDevice = true }
-                .buttonStyle(.glassProminent)
+    @ViewBuilder private var empty: some View {
+        if let scope, let group = model.group(scope) {
+            ContentUnavailableView {
+                Label("Deze ruimte is nog leeg", systemImage: RoomSymbol.symbol(group))
+            } description: {
+                Text("Verplaats een apparaat hierheen met een lange druk op zijn tegel.")
+            }
+        } else {
+            ContentUnavailableView {
+                Label("Nog geen apparaten", systemImage: "house")
+            } description: {
+                Text("Voeg een apparaat toe uit een van je apps, of een Matter-apparaat met zijn code.")
+            } actions: {
+                Button("Apparaat toevoegen") { model.addingDevice = true }
+                    .buttonStyle(.glassProminent)
+            }
+            .frame(minHeight: 400)
         }
-        .frame(minHeight: 400)
+    }
+}
+
+extension View {
+    /// The title for the back button, VoiceOver and the Mac's window; on iOS not drawn in the bar,
+    /// since every page names itself with the capsule at its top.
+    @ViewBuilder
+    func pageTitle(_ title: String) -> some View {
+        #if os(iOS)
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(removing: .title)
+        #else
+        navigationTitle(title)
+        #endif
+    }
+}
+
+extension HomeModel {
+    /// The devices of the whole house (nil) or of a place and everything below it.
+    func devices(scope: String?) -> [Device] {
+        guard let scope else { return visibleDevices.sorted(by: Self.tileOrder) }
+        return allDevices(under: scope)
+    }
+
+    /// The rooms of the whole house (nil), or a place itself and the rooms below it, in display
+    /// order with their depth.
+    func rooms(scope: String?) -> [(group: DeviceGroup, depth: Int)] {
+        guard let scope, let root = group(scope) else { return scope == nil ? roomTree : [] }
+        var out: [(DeviceGroup, Int)] = [(root, 0)]
+        func walk(_ parent: String, _ depth: Int) {
+            for child in children(of: parent) {
+                out.append((child, depth))
+                walk(child.id, depth + 1)
+            }
+        }
+        walk(scope, 1)
+        return out
     }
 }
 
@@ -156,17 +267,21 @@ struct HomeToolbar: ToolbarContent {
 /// Home's category buttons: symbol, name and what is going on, in a row that scrolls.
 struct CategoryStrip: View {
     @Environment(HomeModel.self) private var model
+    var scope: String?
 
     var body: some View {
-        let categories = model.presentCategories
+        let devices = model.devices(scope: scope)
+        let categories = DevicePresentation.Category.allCases.filter { category in
+            devices.contains { DevicePresentation.categories($0).contains(category) }
+        }
         if !categories.isEmpty {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(categories) { category in
-                        NavigationLink(value: HomeRoute.category(category)) {
+                        NavigationLink(value: HomeRoute.category(category, scope: scope)) {
                             CategoryButton(
                                 category: category,
-                                summary: DevicePresentation.summary(category, devices: Array(model.visibleDevices)))
+                                summary: DevicePresentation.summary(category, devices: devices))
                         }
                         .buttonStyle(.plain)
                     }
@@ -222,18 +337,23 @@ struct HomeBackground: View {
     }
 }
 
-/// The devices of one category, room by room.
+/// The devices of one category, room by room, within a scope (nil: the whole house).
 struct CategoryView: View {
     @Environment(HomeModel.self) private var model
     let category: DevicePresentation.Category
+    var scope: String? = nil
 
     var body: some View {
-        let devices = model.devices(in: category)
+        let devices = model.devices(scope: scope).filter { DevicePresentation.categories($0).contains(category) }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14, pinnedViews: .sectionHeaders) {
-                let summary = DevicePresentation.summary(category, devices: devices)
-                if !summary.isEmpty {
-                    Text(summary).font(.title3).foregroundStyle(.secondary)
+                Section {
+                    let summary = DevicePresentation.summary(category, devices: devices)
+                    if !summary.isEmpty {
+                        Text(summary).font(.title3).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    SectionTitle<HomeRoute>(title: category.title, subtitle: scope.map { model.path(of: $0) })
                 }
                 ForEach(rooms(devices), id: \.0) { title, members in
                     Section {
@@ -251,99 +371,28 @@ struct CategoryView: View {
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
         }
-        .navigationTitle(category.title)
+        .pageTitle(category.title)
         .background(HomeBackground())
-        .largeTitle()
         .refreshable { await model.reloadDevices() }
     }
 
     private func rooms(_ devices: [Device]) -> [(String, [Device])] {
         var out: [(String, [Device])] = []
-        for entry in model.roomTree {
+        for entry in model.rooms(scope: scope) {
             let members = devices.filter { $0.groupId == entry.group.id }
             if !members.isEmpty { out.append((model.path(of: entry.group.id), members)) }
         }
-        let known = Set(model.groups.map(\.id))
-        let loose = devices.filter { $0.groupId.map { !known.contains($0) } ?? true }
-        if !loose.isEmpty { out.append(("Overig", loose)) }
-        return out
-    }
-}
-
-/// One room: its own tiles, then the rooms inside it.
-struct RoomView: View {
-    @Environment(HomeModel.self) private var model
-    let groupID: String
-    /// A tab of its own (a location in the tab bar): it carries the menu at the top then.
-    var isTab = false
-    @State private var editing = false
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14, pinnedViews: .sectionHeaders) {
-                if let group = model.group(groupID) {
-                    let own = model.devices(in: groupID)
-                    let cameras = own.filter { $0.deviceClass == "camera" || $0.deviceClass == "doorbell" }
-                    if !cameras.isEmpty { CameraStrip(cameras: cameras) }
-                    let rest = own.filter { !cameras.contains($0) }
-                    if !rest.isEmpty { TileGrid(devices: rest) }
-                    ForEach(subrooms(of: group.id), id: \.id) { sub in
-                        let members = model.devices(in: sub.id)
-                        if !members.isEmpty {
-                            Section {
-                                TileGrid(devices: members)
-                            } header: {
-                                SectionTitle<HomeRoute>(title: model.path(of: sub.id).replacingOccurrences(of: "\(group.name) › ", with: ""))
-                            }
-                        }
-                    }
-                    if model.allDevices(under: groupID).isEmpty {
-                        ContentUnavailableView {
-                            Label("Deze ruimte is nog leeg", systemImage: RoomSymbol.symbol(group))
-                        } description: {
-                            Text("Verplaats een apparaat hierheen met een lange druk op zijn tegel.")
-                        }
-                    }
-                } else {
-                    ContentUnavailableView("Ruimte niet gevonden", systemImage: "questionmark.square.dashed")
-                }
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 24)
-            .frame(maxWidth: 1100)
-            .frame(maxWidth: .infinity)
+        if scope == nil {
+            let known = Set(model.groups.map(\.id))
+            let loose = devices.filter { $0.groupId.map { !known.contains($0) } ?? true }
+            if !loose.isEmpty { out.append(("Overig", loose)) }
         }
-        .navigationTitle(model.group(groupID)?.name ?? "Ruimte")
-        .background(HomeBackground())
-        .largeTitle()
-        .toolbar {
-            ToolbarItem(placement: .trailingBar) {
-                Button("Ruimte-instellingen", systemImage: "slider.horizontal.3") { editing = true }
-            }
-        }
-        .sheet(isPresented: $editing) {
-            NavigationStack { RoomEditor(groupID: groupID) }
-                .environment(model)
-        }
-        .modifier(TabMenu(active: isTab))
-        .refreshable { await model.reloadDevices() }
-    }
-
-    private func subrooms(of id: String) -> [DeviceGroup] {
-        var out: [DeviceGroup] = []
-        func walk(_ parent: String) {
-            for child in model.children(of: parent) {
-                out.append(child)
-                walk(child.id)
-            }
-        }
-        walk(id)
         return out
     }
 }
 
 #Preview("Thuis") {
-    NavigationStack { HomeView() }.previewHouse()
+    NavigationStack { HomeView(isTab: true) }.previewHouse()
 }
 
 /// The menu at the top only where the view is a tab's first screen.

@@ -40,7 +40,7 @@ enum PreviewHouse {
             Device(id: "door", groupId: "tuin", sortOrder: 1, name: "Achterdeur", deviceClass: "lock", capabilities: [
                 Capability(id: "locked", title: "Op slot", type: "boolean", setable: true, value: .bool(true)),
             ]),
-            Device(id: "cam", groupId: "tuin", sortOrder: 2, name: "Oprit", deviceClass: "camera", capabilities: [
+            Device(id: "cam", groupId: "woonkamer", sortOrder: 4, name: "Woonkamer", deviceClass: "camera", capabilities: [
                 Capability(id: "alarm_motion", title: "Beweging", type: "boolean", value: .bool(false)),
             ]),
             Device(id: "blinds", groupId: "slaapkamer", sortOrder: 1, name: "Rolluik", deviceClass: "blinds", capabilities: [

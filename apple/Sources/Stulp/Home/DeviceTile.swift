@@ -112,7 +112,8 @@ struct DeviceTile: View {
         Button("Bediening en instellingen", systemImage: "slider.horizontal.3") {
             model.openDevice = device.id
         }
-        if !device.isScene {
+        do {
+            // Scenes too: a scene put in a location shows under that location's scenes.
             Menu("Verplaats naar", systemImage: "arrow.right.square") {
                 ForEach(model.roomTree, id: \.group.id) { entry in
                     Button(String(repeating: "   ", count: entry.depth) + entry.group.name) {
