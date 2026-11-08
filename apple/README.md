@@ -13,7 +13,8 @@ Apple's Woning-app.
 - **iPhone:** onderin *Thuis* en de locaties op het eerste niveau (Beneden, Eerste etage, Tuin),
   elk met het icoon uit de ruimte-editor. *Thuis* toont bovenaan de categorieën (Klimaat,
   Verlichting, Beveiliging, …) met wat er speelt, daaronder de scènes, de camera's en per ruimte de
-  tegels; de balk toont de ruimte waar je langs scrolt. Tik op het symbool van een tegel om hem te
+  tegels; de kop van de ruimte waar je bent blijft als klein kapsel bovenin staan, zoals de maand in
+  Haas Foto's. Tik op het symbool van een tegel om hem te
   schakelen, op de rest voor de bediening; lang drukken geeft verplaatsen en verwijderen. Het menu
   (…) bovenin leidt naar *Automatisering*, *Meldingen* en *Instellingen*; de plus voegt een
   apparaat (ook een fabrieksnieuw Matter-apparaat via Apple's eigen scherm) of een ruimte toe.

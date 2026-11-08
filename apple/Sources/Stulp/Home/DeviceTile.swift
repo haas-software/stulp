@@ -154,7 +154,9 @@ struct TileGrid: View {
     }
 }
 
-/// A section title as Home has them: bold, and a chevron when it leads somewhere.
+/// A section heading as Haas Foto's has its month: a small glass capsule. In a `LazyVStack` with
+/// pinned section headers it stays at the top while its section scrolls by, until the next one
+/// pushes it away, so where you are is always in sight; the title bar itself stays put.
 struct SectionTitle<Destination: Hashable>: View {
     let title: String
     var subtitle: String?
@@ -169,27 +171,34 @@ struct SectionTitle<Destination: Hashable>: View {
                 label(chevron: false)
             }
         }
-        .padding(.top, 6)
-        .tracksSection(title)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+        .id(Self.scrollID(title))
     }
 
     private func label(chevron: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(title).font(.title3.weight(.bold))
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(title).font(.headline.weight(.bold))
+            if let subtitle {
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            }
             if chevron {
                 Image(systemName: "chevron.forward")
-                    .font(.subheadline.weight(.bold))
+                    .font(.footnote.weight(.bold))
                     .foregroundStyle(.secondary)
             }
-            if let subtitle {
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).padding(.leading, 4)
-            }
-            Spacer()
         }
-        .contentShape(.rect)
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .glassEffect(.regular.interactive(chevron), in: .capsule)
+        .contentShape(.capsule)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
+
+    /// The scroll id of a heading (`-stulpScrollTo` in debug builds).
+    static func scrollID(_ title: String) -> String { "section:\(title)" }
 }
 
 #Preview("Tegels") {

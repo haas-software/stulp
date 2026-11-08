@@ -15,7 +15,7 @@ struct HomeView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 14, pinnedViews: .sectionHeaders) {
                     if !model.loaded {
                         ProgressView("Stulp laden…")
                             .frame(maxWidth: .infinity, minHeight: 240)
@@ -30,12 +30,12 @@ struct HomeView: View {
                 .frame(maxWidth: 1100)
                 .frame(maxWidth: .infinity)
             }
-            .sectionTitles("Thuis")
+            .navigationTitle("Thuis")
             .task(id: model.loaded) {
                 // `-stulpScrollTo Keuken`: start scrolled to that heading, for screenshots.
                 if model.loaded, let heading = DebugLaunch.scrollTo {
                     try? await Task.sleep(for: .milliseconds(300))
-                    proxy.scrollTo(SectionTracker.scrollID(heading), anchor: .top)
+                    proxy.scrollTo(SectionTitle<HomeRoute>.scrollID(heading), anchor: .top)
                 }
             }
         }
@@ -60,32 +60,44 @@ struct HomeView: View {
 
         let scenes = model.sceneDevices
         if !scenes.isEmpty {
-            SectionTitle<HomeRoute>(title: "Scènes")
-            TileGrid(devices: scenes, tapToggles: true)
+            Section {
+                TileGrid(devices: scenes, tapToggles: true)
+            } header: {
+                SectionTitle<HomeRoute>(title: "Scènes")
+            }
         }
 
         let cameras = model.cameras
         if !cameras.isEmpty {
-            SectionTitle<HomeRoute>(title: "Camera's")
-            CameraStrip(cameras: cameras)
+            Section {
+                CameraStrip(cameras: cameras)
+            } header: {
+                SectionTitle<HomeRoute>(title: "Camera's")
+            }
         }
 
         ForEach(model.roomTree, id: \.group.id) { entry in
             let devices = tiles(model.devices(in: entry.group.id))
             if !devices.isEmpty {
                 // The room by name, its location (the tab it lives under) small beside it.
-                SectionTitle(
-                    title: entry.depth == 0 ? entry.group.name : pathBelowRoot(entry.group),
-                    subtitle: entry.depth == 0 ? nil : model.group(rootID(entry.group))?.name,
-                    destination: HomeRoute.room(entry.group.id))
-                TileGrid(devices: devices)
+                Section {
+                    TileGrid(devices: devices)
+                } header: {
+                    SectionTitle(
+                        title: entry.depth == 0 ? entry.group.name : pathBelowRoot(entry.group),
+                        subtitle: entry.depth == 0 ? nil : model.group(rootID(entry.group))?.name,
+                        destination: HomeRoute.room(entry.group.id))
+                }
             }
         }
 
         let loose = tiles(model.devices(in: nil))
         if !loose.isEmpty {
-            SectionTitle<HomeRoute>(title: "Overig")
-            TileGrid(devices: loose)
+            Section {
+                TileGrid(devices: loose)
+            } header: {
+                SectionTitle<HomeRoute>(title: "Overig")
+            }
         }
     }
 
@@ -218,14 +230,17 @@ struct CategoryView: View {
     var body: some View {
         let devices = model.devices(in: category)
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 14, pinnedViews: .sectionHeaders) {
                 let summary = DevicePresentation.summary(category, devices: devices)
                 if !summary.isEmpty {
                     Text(summary).font(.title3).foregroundStyle(.secondary)
                 }
                 ForEach(rooms(devices), id: \.0) { title, members in
-                    SectionTitle<HomeRoute>(title: title)
-                    TileGrid(devices: members)
+                    Section {
+                        TileGrid(devices: members)
+                    } header: {
+                        SectionTitle<HomeRoute>(title: title)
+                    }
                 }
                 if devices.isEmpty {
                     ContentUnavailableView("Niets in \(category.title.lowercased())", systemImage: category.symbol)
@@ -236,7 +251,7 @@ struct CategoryView: View {
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
         }
-        .sectionTitles(category.title)
+        .navigationTitle(category.title)
         .background(HomeBackground())
         .largeTitle()
         .refreshable { await model.reloadDevices() }
@@ -265,7 +280,7 @@ struct RoomView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 14, pinnedViews: .sectionHeaders) {
                 if let group = model.group(groupID) {
                     let own = model.devices(in: groupID)
                     let cameras = own.filter { $0.deviceClass == "camera" || $0.deviceClass == "doorbell" }
@@ -275,8 +290,11 @@ struct RoomView: View {
                     ForEach(subrooms(of: group.id), id: \.id) { sub in
                         let members = model.devices(in: sub.id)
                         if !members.isEmpty {
-                            SectionTitle<HomeRoute>(title: model.path(of: sub.id).replacingOccurrences(of: "\(group.name) › ", with: ""))
-                            TileGrid(devices: members)
+                            Section {
+                                TileGrid(devices: members)
+                            } header: {
+                                SectionTitle<HomeRoute>(title: model.path(of: sub.id).replacingOccurrences(of: "\(group.name) › ", with: ""))
+                            }
                         }
                     }
                     if model.allDevices(under: groupID).isEmpty {
@@ -295,7 +313,7 @@ struct RoomView: View {
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity)
         }
-        .sectionTitles(model.group(groupID)?.name ?? "Ruimte")
+        .navigationTitle(model.group(groupID)?.name ?? "Ruimte")
         .background(HomeBackground())
         .largeTitle()
         .toolbar {

@@ -93,9 +93,15 @@ struct RootView: View {
             Tab("Thuis", systemImage: "house.fill", value: AppTab.home) {
                 NavigationStack { HomeView() }
             }
-            ForEach(model.children(of: nil)) { group in
-                Tab(group.name, systemImage: RoomSymbol.symbol(group), value: AppTab.room(group.id)) {
-                    NavigationStack { RoomView(groupID: group.id, isTab: true) }
+            // The system tab bar keeps a tab's label and place for as long as its identity stays
+            // the same, so a new order (or name, or icon) never showed. Each location tab's
+            // identity therefore carries all of that: a change makes new tabs, drawn in the new
+            // order. Only these tabs are rebuilt; Thuis, with Instellingen pushed on it, stays.
+            let locations = model.children(of: nil)
+            let signature = locations.map { "\($0.id):\($0.name):\(RoomSymbol.symbol($0))" }.joined(separator: "|")
+            ForEach(locations.map { (key: "\($0.id)#\(signature)", group: $0) }, id: \.key) { entry in
+                Tab(entry.group.name, systemImage: RoomSymbol.symbol(entry.group), value: AppTab.room(entry.group.id)) {
+                    NavigationStack { RoomView(groupID: entry.group.id, isTab: true) }
                 }
             }
             // Only with a sidebar (iPad, an open Duo); on an iPhone they are in the menu at the top,
