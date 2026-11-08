@@ -7,10 +7,12 @@ enum PreviewHouse {
     @MainActor
     static func fill(_ model: HomeModel) {
         let groups = [
-            DeviceGroup(id: "woonkamer", name: "Woonkamer", sortOrder: 1),
-            DeviceGroup(id: "keuken", name: "Keuken", sortOrder: 2),
-            DeviceGroup(id: "slaapkamer", name: "Slaapkamer", sortOrder: 3),
-            DeviceGroup(id: "tuin", name: "Tuin", sortOrder: 4),
+            DeviceGroup(id: "beneden", name: "Beneden", sortOrder: 1),
+            DeviceGroup(id: "etage1", name: "Eerste etage", sortOrder: 2),
+            DeviceGroup(id: "tuin", name: "Tuin", sortOrder: 3),
+            DeviceGroup(id: "woonkamer", name: "Woonkamer", parentId: "beneden", sortOrder: 1),
+            DeviceGroup(id: "keuken", name: "Keuken", parentId: "beneden", sortOrder: 2),
+            DeviceGroup(id: "slaapkamer", name: "Slaapkamer", parentId: "etage1", sortOrder: 1),
             DeviceGroup(id: "bank", name: "Bank", parentId: "woonkamer", sortOrder: 1),
         ]
         func onoff(_ on: Bool) -> Capability {

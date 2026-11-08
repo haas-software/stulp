@@ -184,12 +184,15 @@ public struct DeviceGroup: Identifiable, Sendable, Hashable, Codable {
     public var name: String
     public var parentId: String?
     public var sortOrder: Double?
+    /// The SF Symbol the person chose for this place; nil lets the app guess from the name.
+    public var icon: String?
 
-    public init(id: String, name: String, parentId: String? = nil, sortOrder: Double? = nil) {
+    public init(id: String, name: String, parentId: String? = nil, sortOrder: Double? = nil, icon: String? = nil) {
         self.id = id
         self.name = name
         self.parentId = parentId
         self.sortOrder = sortOrder
+        self.icon = icon
     }
 
     public init(from decoder: Decoder) throws {
@@ -199,6 +202,8 @@ public struct DeviceGroup: Identifiable, Sendable, Hashable, Codable {
         let parent = (try? c.decodeIfPresent(String.self, forKey: .parentId)) ?? nil
         parentId = parent?.isEmpty == true ? nil : parent
         sortOrder = try? c.decodeIfPresent(Double.self, forKey: .sortOrder)
+        let icon = (try? c.decodeIfPresent(String.self, forKey: .icon)) ?? nil
+        self.icon = icon?.isEmpty == true ? nil : icon
     }
 }
 

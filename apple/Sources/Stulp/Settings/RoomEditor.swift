@@ -69,7 +69,7 @@ struct RoomsView: View {
 
     private func row(_ group: DeviceGroup) -> some View {
         HStack {
-            Label(group.name, systemImage: RoomSymbol.name(for: group.name))
+            Label(group.name, systemImage: RoomSymbol.symbol(group))
             Spacer()
             Text.count(model.allDevices(under: group.id).count, "apparaat", "apparaten")
                 .foregroundStyle(.secondary)
@@ -96,6 +96,8 @@ struct RoomEditor: View {
 
     @State private var name = ""
     @State private var parent: String?
+    /// nil: guessed from the name.
+    @State private var icon: String?
     @State private var order: [Device] = []
     @State private var loaded = false
     @State private var working = false
@@ -113,6 +115,15 @@ struct RoomEditor: View {
                 if model.groups.contains(where: { $0.id != groupID && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
                     Text("Er is al een ruimte met deze naam.").foregroundStyle(.red)
                 }
+            }
+            Section {
+                IconPicker(selection: $icon, guess: RoomSymbol.name(for: trimmed))
+            } header: {
+                Text("Icoon")
+            } footer: {
+                Text(parent == nil
+                    ? "Een locatie op het bovenste niveau staat met dit icoon in de tabbalk."
+                    : "Het icoon van de ruimte in de zijbalk en in Thuis.")
             }
             Section {
                 Picker("Binnen", selection: $parent) {
@@ -192,6 +203,7 @@ struct RoomEditor: View {
         loaded = true
         name = existing?.name ?? ""
         parent = existing?.parentId
+        icon = existing?.icon
         if let groupID { order = model.devices(in: groupID) }
     }
 
@@ -201,12 +213,14 @@ struct RoomEditor: View {
         let original = groupID.map { model.devices(in: $0).map(\.id) } ?? []
         let ok = await model.perform { client in
             if let groupID {
-                _ = try await client.updateGroup(groupID, ["name": .string(trimmed), "parentId": .string(parent ?? "")])
+                _ = try await client.updateGroup(groupID, [
+                    "name": .string(trimmed), "parentId": .string(parent ?? ""), "icon": .string(icon ?? ""),
+                ])
                 if order.map(\.id) != original {
                     try await client.orderDevices(group: groupID, ids: order.map(\.id))
                 }
             } else {
-                _ = try await client.createGroup(name: trimmed, parentId: parent)
+                _ = try await client.createGroup(name: trimmed, parentId: parent, icon: icon)
             }
         }
         guard ok else { return }
@@ -222,6 +236,45 @@ struct RoomEditor: View {
         guard ok else { return }
         await model.reloadDevices()
         dismiss()
+    }
+}
+
+/// A grid of symbols to choose a place's icon from. The first cell is "Automatisch": the symbol
+/// guessed from the name, which follows the name while it is chosen.
+private struct IconPicker: View {
+    @Binding var selection: String?
+    let guess: String
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)], spacing: 8) {
+            cell(symbol: guess, value: nil, label: "Automatisch")
+                .overlay(alignment: .bottomTrailing) {
+                    Text("A")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(2)
+                }
+            ForEach(RoomSymbol.choices, id: \.self) { symbol in
+                cell(symbol: symbol, value: symbol, label: symbol)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func cell(symbol: String, value: String?, label: String) -> some View {
+        let chosen = selection == value
+        return Button {
+            selection = value
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(chosen ? Color.white : Color.secondary)
+                .frame(width: 44, height: 44)
+                .background(chosen ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.quaternary), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }
 

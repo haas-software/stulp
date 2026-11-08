@@ -1,9 +1,11 @@
 import StulpKit
 import SwiftUI
 
-/// The places in the app. On iPhone a tab bar (Thuis, Automatisering, Instellingen); on iPad the
-/// same tabs as a sidebar with the categories and rooms in it, as Home does; on the Mac a sidebar
-/// window with Settings in ⌘,.
+/// The places in the app. On iPhone a tab bar with Thuis and the house's first level of places
+/// (floors, or rooms in a flat house), each with its icon, so one tap takes you there; Automatisering,
+/// Meldingen and Instellingen sit in the menu at the top. On iPad the same tabs as a sidebar, with
+/// the categories, Automatisering and Instellingen in it too; on the Mac a sidebar window with
+/// Settings in ⌘,.
 enum AppTab: Hashable {
     case home
     case category(DevicePresentation.Category)
@@ -19,6 +21,7 @@ enum AppTab: Hashable {
         case "settings": .settings
         case "apps": .apps
         case "notifications": .notifications
+        case let tab? where tab.hasPrefix("room:"): .room(String(tab.dropFirst(5)))
         default: .home
         }
     }
@@ -90,7 +93,13 @@ struct RootView: View {
             Tab("Thuis", systemImage: "house.fill", value: AppTab.home) {
                 NavigationStack { HomeView() }
             }
-            // Only with a sidebar (iPad, an open Duo): in a tab bar these would crowd out the rest.
+            ForEach(model.children(of: nil)) { group in
+                Tab(group.name, systemImage: RoomSymbol.symbol(group), value: AppTab.room(group.id)) {
+                    NavigationStack { RoomView(groupID: group.id, isTab: true) }
+                }
+            }
+            // Only with a sidebar (iPad, an open Duo); on an iPhone they are in the menu at the top,
+            // so the tab bar holds the places.
             if width == .regular {
                 TabSection("Categorieën") {
                     ForEach(model.presentCategories) { category in
@@ -99,19 +108,12 @@ struct RootView: View {
                         }
                     }
                 }
-                TabSection("Ruimtes") {
-                    ForEach(model.children(of: nil)) { group in
-                        Tab(group.name, systemImage: RoomSymbol.name(for: group.name), value: AppTab.room(group.id)) {
-                            NavigationStack { RoomView(groupID: group.id) }
-                        }
-                    }
+                Tab("Automatisering", systemImage: "clock.fill", value: AppTab.automations) {
+                    NavigationStack { FlowsView() }
                 }
-            }
-            Tab("Automatisering", systemImage: "clock.fill", value: AppTab.automations) {
-                NavigationStack { FlowsView() }
-            }
-            Tab("Instellingen", systemImage: "gearshape.fill", value: AppTab.settings) {
-                NavigationStack { SettingsView() }
+                Tab("Instellingen", systemImage: "gearshape.fill", value: AppTab.settings) {
+                    NavigationStack { SettingsView() }
+                }
             }
         }
         .tabViewStyle(.sidebarAdaptable)
@@ -120,10 +122,11 @@ struct RootView: View {
             // A room that is gone cannot stay selected.
             if case .room(let id) = tab, model.group(id) == nil { tab = .home }
         }
-        .onChange(of: width) { _, new in
-            // Folding the Duo shut takes the sidebar's rooms and categories away.
+        .onChange(of: width, initial: true) { _, new in
+            // Folding the Duo shut takes the sidebar's categories, Automatisering and Instellingen
+            // away; they are in the menu at the top then.
             switch tab {
-            case .category, .room: if new != .regular { tab = .home }
+            case .category, .automations, .settings, .notifications, .apps: if new != .regular { tab = .home }
             default: break
             }
         }
@@ -147,9 +150,9 @@ private struct MacRootView: View {
                         Label(category.title, systemImage: category.symbol).tag(AppTab.category(category))
                     }
                 }
-                Section("Ruimtes") {
+                Section("Locaties") {
                     ForEach(model.children(of: nil)) { group in
-                        Label(group.name, systemImage: RoomSymbol.name(for: group.name)).tag(AppTab.room(group.id))
+                        Label(group.name, systemImage: RoomSymbol.symbol(group)).tag(AppTab.room(group.id))
                     }
                 }
                 Section("Stulp") {
@@ -201,23 +204,56 @@ struct ConnectionFooter: View {
     }
 }
 
-/// A symbol for a room from its name, so the sidebar reads like Home's. Unknown names get a door.
-enum RoomSymbol {
-    static func name(for room: String) -> String {
-        let n = room.lowercased()
-        let table: [(String, String)] = [
-            ("woonkamer", "sofa.fill"), ("zitkamer", "sofa.fill"), ("living", "sofa.fill"),
-            ("keuken", "fork.knife"), ("eetkamer", "fork.knife"),
-            ("slaapkamer", "bed.double.fill"), ("kinderkamer", "teddybear.fill"),
-            ("badkamer", "bathtub.fill"), ("douche", "shower.fill"), ("toilet", "toilet.fill"), ("wc", "toilet.fill"),
-            ("tuin", "tree.fill"), ("buiten", "sun.horizon.fill"), ("terras", "chair.lounge.fill"), ("balkon", "chair.lounge.fill"),
-            ("garage", "car.fill"), ("oprit", "car.fill"),
-            ("kantoor", "desktopcomputer"), ("werkkamer", "desktopcomputer"), ("studeer", "desktopcomputer"),
-            ("hal", "door.left.hand.closed"), ("gang", "door.left.hand.closed"), ("entree", "door.left.hand.closed"),
-            ("trap", "stairs"), ("overloop", "stairs"), ("zolder", "house.lodge.fill"),
-            ("wasruimte", "washer.fill"), ("bijkeuken", "washer.fill"), ("berging", "cabinet.fill"), ("schuur", "cabinet.fill"),
-        ]
-        return table.first { n.contains($0.0) }?.1 ?? "square.split.bottomrightquarter.fill"
+/// Where the menu at the top leads, on an iPhone (the iPad and the Mac have these in the sidebar).
+enum MenuRoute: Hashable {
+    case automations, notifications, settings
+}
+
+extension View {
+    /// The menu (…) of a tab's first screen on an iPhone: Automatisering, Meldingen, Instellingen,
+    /// pushed onto that tab's stack. With a sidebar only the bell, since the rest is in the sidebar.
+    func mainMenu() -> some View {
+        modifier(MainMenu())
+    }
+}
+
+private struct MainMenu: ViewModifier {
+    @State private var route: MenuRoute?
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var width
+    #endif
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content
+            .toolbar {
+                if width == .regular {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Meldingen", systemImage: "bell") { route = .notifications }
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button("Automatisering", systemImage: "clock") { route = .automations }
+                            Button("Meldingen", systemImage: "bell") { route = .notifications }
+                            Divider()
+                            Button("Instellingen", systemImage: "gearshape") { route = .settings }
+                        } label: {
+                            Label("Menu", systemImage: "ellipsis")
+                        }
+                    }
+                }
+            }
+            .navigationDestination(item: $route) { route in
+                switch route {
+                case .automations: FlowsView()
+                case .notifications: NotificationsView()
+                case .settings: SettingsView()
+                }
+            }
+        #else
+        content
+        #endif
     }
 }
 

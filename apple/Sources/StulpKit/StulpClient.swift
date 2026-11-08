@@ -181,8 +181,10 @@ public struct StulpClient: Sendable {
         try await get("/api/stulp/device-groups")
     }
 
-    public func createGroup(name: String, parentId: String?) async throws -> DeviceGroup {
-        try await call("POST", "/api/stulp/device-groups", json: ["name": .string(name), "parentId": .string(parentId ?? "")])
+    public func createGroup(name: String, parentId: String?, icon: String? = nil) async throws -> DeviceGroup {
+        var body: [String: JSONValue] = ["name": .string(name), "parentId": .string(parentId ?? "")]
+        if let icon { body["icon"] = .string(icon) }
+        return try await call("POST", "/api/stulp/device-groups", json: .object(body))
     }
 
     public func updateGroup(_ id: String, _ fields: JSONValue) async throws -> DeviceGroup {

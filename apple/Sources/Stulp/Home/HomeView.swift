@@ -48,6 +48,7 @@ struct HomeView: View {
             }
         }
         .toolbar { HomeToolbar() }
+        .mainMenu()
         .refreshable { await model.reloadDevices() }
     }
 
@@ -72,9 +73,11 @@ struct HomeView: View {
         ForEach(model.roomTree, id: \.group.id) { entry in
             let devices = tiles(model.devices(in: entry.group.id))
             if !devices.isEmpty {
+                // The room by name, its location (the tab it lives under) small beside it.
                 SectionTitle(
-                    title: entry.depth == 0 ? entry.group.name : model.path(of: entry.group.id),
-                    destination: HomeRoute.room(entry.depth == 0 ? entry.group.id : rootID(entry.group)))
+                    title: entry.depth == 0 ? entry.group.name : pathBelowRoot(entry.group),
+                    subtitle: entry.depth == 0 ? nil : model.group(rootID(entry.group))?.name,
+                    destination: HomeRoute.room(entry.group.id))
                 TileGrid(devices: devices)
             }
         }
@@ -89,6 +92,13 @@ struct HomeView: View {
     /// Scenes and cameras have their own rows above.
     private func tiles(_ devices: [Device]) -> [Device] {
         devices.filter { !$0.isScene && $0.deviceClass != "camera" && $0.deviceClass != "doorbell" }
+    }
+
+    /// "Woonkamer › Bank" for Beneden › Woonkamer › Bank: the location is already the subtitle.
+    private func pathBelowRoot(_ group: DeviceGroup) -> String {
+        let root = model.group(rootID(group))?.name ?? ""
+        let path = model.path(of: group.id)
+        return path.hasPrefix(root + " › ") ? String(path.dropFirst(root.count + 3)) : path
     }
 
     private func rootID(_ group: DeviceGroup) -> String {
@@ -116,15 +126,6 @@ struct HomeToolbar: ToolbarContent {
     @State private var addingRoom = false
 
     var body: some ToolbarContent {
-        #if os(iOS)
-        ToolbarItem(placement: .topBarLeading) {
-            NavigationLink {
-                NotificationsView()
-            } label: {
-                Label("Meldingen", systemImage: "bell")
-            }
-        }
-        #endif
         ToolbarItem(placement: .trailingBar) {
             Menu {
                 Button("Apparaat toevoegen", systemImage: "plus.square.on.square") { model.addingDevice = true }
@@ -258,6 +259,8 @@ struct CategoryView: View {
 struct RoomView: View {
     @Environment(HomeModel.self) private var model
     let groupID: String
+    /// A tab of its own (a location in the tab bar): it carries the menu at the top then.
+    var isTab = false
     @State private var editing = false
 
     var body: some View {
@@ -278,7 +281,7 @@ struct RoomView: View {
                     }
                     if model.allDevices(under: groupID).isEmpty {
                         ContentUnavailableView {
-                            Label("Deze ruimte is nog leeg", systemImage: RoomSymbol.name(for: group.name))
+                            Label("Deze ruimte is nog leeg", systemImage: RoomSymbol.symbol(group))
                         } description: {
                             Text("Verplaats een apparaat hierheen met een lange druk op zijn tegel.")
                         }
@@ -297,13 +300,14 @@ struct RoomView: View {
         .largeTitle()
         .toolbar {
             ToolbarItem(placement: .trailingBar) {
-                Button("Ruimte-instellingen", systemImage: "ellipsis") { editing = true }
+                Button("Ruimte-instellingen", systemImage: "slider.horizontal.3") { editing = true }
             }
         }
         .sheet(isPresented: $editing) {
             NavigationStack { RoomEditor(groupID: groupID) }
                 .environment(model)
         }
+        .modifier(TabMenu(active: isTab))
         .refreshable { await model.reloadDevices() }
     }
 
@@ -322,4 +326,13 @@ struct RoomView: View {
 
 #Preview("Thuis") {
     NavigationStack { HomeView() }.previewHouse()
+}
+
+/// The menu at the top only where the view is a tab's first screen.
+private struct TabMenu: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active { content.mainMenu() } else { content }
+    }
 }
