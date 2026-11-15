@@ -8,8 +8,8 @@ extern crate std;
 use alloc::{string::String, vec::Vec};
 use stulp_core::json::{self, Value};
 use stulp_sdk::{
-    Client, DatagramRequest, DatagramTarget, Error, Plugin, Result, StreamCommand, StreamEvent,
-    Transport, clone,
+    Client, Datagram, DatagramRequest, DatagramTarget, Error, Plugin, Result, StreamCommand,
+    StreamEvent, Transport, UdpCommand, UdpEvent, clone,
     util::{field, join},
 };
 mod api;
@@ -22,8 +22,10 @@ use map::Driver;
 const PORT: u16 = 6053;
 /// Een stap van de handshake, of het antwoord op een ping, mag zo lang duren.
 const ANSWER_MS: u64 = 10_000;
-/// Verbinden met een apparaat dat niet bestaat duurt even; daarna is het een fout.
-const OPEN_MS: u64 = 15_000;
+/// Verbinden mag zo lang duren. Ruim boven de 15 s waarin HopOS (en de
+/// native host) zelf het verbinden opgeeft: dan komt eerst hún Closed, met de
+/// reden, en zit de plaats van die stroom niet nog vast als de volgende komt.
+const OPEN_MS: u64 = 20_000;
 /// Zo vaak vraagt Stulp of het apparaat er nog is. Het apparaat pingt zelf ook.
 const PING_MS: u64 = 20_000;
 /// Langer wacht een volgende poging nooit.
@@ -62,6 +64,19 @@ struct Device {
     /// Het adres klopte niet (ander apparaat, of geen antwoord): eerst opnieuw zoeken.
     lost: bool,
     error: String,
+}
+impl Phase {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::Opening => "opening",
+            Self::Hello => "hello",
+            Self::Connect => "connect",
+            Self::Info => "info",
+            Self::List => "list",
+            Self::Live => "live",
+        }
+    }
 }
 impl Device {
     fn new(id: &str, driver: Driver, mac: &str, now: u64) -> Result<Self> {
@@ -122,7 +137,27 @@ pub struct Esphome {
     serial: u64,
     found: Vec<mdns::Found>,
     searched: Option<u64>,
+    /// De mDNS-socket op poort 5353, lid van 224.0.0.251.
+    multicast: Multicast,
 }
+
+/// Een vraag vanaf een willekeurige poort krijgt een unicast-antwoord naar het
+/// adres van de vrager. Een HopOS-slot zet zijn multicast als eigen frame op
+/// het LAN, met zijn slotadres (10.100.0.x) als afzender: dat antwoord komt
+/// nooit terug. Een vraag vanaf 5353 wordt met multicast beantwoord, en die
+/// zet HopOS bij elke slot af die lid is van de groep.
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
+enum Multicast {
+    #[default]
+    Closed,
+    /// Binden en lid worden gevraagd; nog geen `Bound`.
+    Open,
+    Bound,
+    /// Binden of lid worden mislukte (een host waar 5353 al bezet is): alleen
+    /// nog de unicast-vraag.
+    Unavailable,
+}
+const MDNS_SOCKET: u64 = 1;
 
 fn friendly(e: &Error) -> Result<String> {
     match e {
@@ -145,15 +180,102 @@ impl Esphome {
         {
             return Ok(());
         }
-        let datagrams = c
+        self.ask_multicast(c)?;
+        let mut datagrams = c
             .datagrams(DatagramRequest {
                 target: DatagramTarget::Mdns,
                 payload: mdns::query()?,
                 timeout_ms: 3000,
             })
             .await?;
+        // Wat er intussen via de groep binnenkwam (ook aankondigingen).
+        self.drain_multicast(c, Some(&mut datagrams))?;
         self.found = mdns::found(&datagrams)?;
         self.searched = Some(c.now());
+        Ok(())
+    }
+
+    /// Stuurt de vraag ook vanaf 5353 naar de groep; opent de socket de eerste keer.
+    fn ask_multicast<T: Transport>(&mut self, c: &mut Client<T>) -> Result {
+        if self.multicast == Multicast::Unavailable {
+            return Ok(());
+        }
+        // Wat er sinds de vorige ronde over de socket bekend werd.
+        self.drain_multicast(c, None)?;
+        if self.multicast == Multicast::Unavailable {
+            return Ok(());
+        }
+        if self.multicast == Multicast::Closed {
+            let opened = c
+                .udp(UdpCommand::Bind {
+                    id: MDNS_SOCKET,
+                    address: json::copy("0.0.0.0:5353")?,
+                })
+                .and_then(|()| {
+                    c.udp(UdpCommand::JoinV4 {
+                        id: MDNS_SOCKET,
+                        group: [224, 0, 0, 251],
+                        interface: [0; 4],
+                    })
+                });
+            if opened.is_err() {
+                self.multicast = Multicast::Unavailable;
+                return Ok(());
+            }
+            self.multicast = Multicast::Open;
+        }
+        if c.udp(UdpCommand::Send {
+            id: MDNS_SOCKET,
+            address: json::copy("224.0.0.251:5353")?,
+            bytes: mdns::query()?,
+        })
+        .is_err()
+        {
+            self.multicast = Multicast::Unavailable;
+        }
+        Ok(())
+    }
+
+    /// Haalt de ontvangen mDNS-pakketten op; buiten een zoekronde gaan ze weg.
+    fn drain_multicast<T: Transport>(
+        &mut self,
+        c: &mut Client<T>,
+        mut into: Option<&mut Vec<Datagram>>,
+    ) -> Result {
+        for _ in 0..256 {
+            let Some(event) = c.poll_udp() else {
+                break;
+            };
+            match event {
+                UdpEvent::Data { id, address, bytes } if id == MDNS_SOCKET => {
+                    if let Some(list) = into.as_deref_mut() {
+                        json::push(
+                            list,
+                            Datagram {
+                                source: address,
+                                interface: 0,
+                                payload: bytes,
+                            },
+                            512,
+                        )?;
+                    }
+                }
+                UdpEvent::Bound(id, _) if id == MDNS_SOCKET => self.multicast = Multicast::Bound,
+                UdpEvent::Error(id, e) if id == MDNS_SOCKET => {
+                    let reason = stulp_sdk::message(&e)?;
+                    c.log("warn", &join(&["ESPHOME_MDNS socket ", &reason])?)?;
+                    // Binden of lid worden lukte niet (5353 bezet): alleen nog unicast.
+                    // Een losse fout van een gebonden socket laat hem staan.
+                    if self.multicast == Multicast::Open {
+                        self.multicast = Multicast::Unavailable;
+                    }
+                }
+                UdpEvent::Closed(id) if id == MDNS_SOCKET => {
+                    self.multicast = Multicast::Unavailable
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
 
@@ -248,6 +370,12 @@ impl Esphome {
             return Err(e);
         }
         let message = friendly(&e)?;
+        let phase = self.devices[i].phase.name();
+        let reason = stulp_sdk::message(&e)?;
+        c.log(
+            "warn",
+            &join(&["ESPHOME_STREAM fail phase=", phase, " reason=", &reason])?,
+        )?;
         let d = &mut self.devices[i];
         d.close(c)?;
         d.failures = d.failures.saturating_add(1);
@@ -273,6 +401,18 @@ impl Esphome {
             .serial
             .checked_add(1)
             .ok_or(Error::Invalid("stream ids exhausted"))?;
+        let mut line = String::new();
+        {
+            use core::fmt::Write as _;
+            line.try_reserve(96)
+                .map_err(|_| stulp_core::Error::Memory)?;
+            let _ = write!(
+                line,
+                "ESPHOME_STREAM open id={} host={host} port={port}",
+                self.serial
+            );
+        }
+        c.log("info", &line)?;
         let d = &mut self.devices[i];
         c.stream(StreamCommand::Open {
             id: self.serial,
@@ -514,6 +654,7 @@ impl Esphome {
         };
         let result = match event {
             StreamEvent::Opened(_) => {
+                c.log("info", "ESPHOME_STREAM opened")?;
                 let d = &mut self.devices[i];
                 d.phase = Phase::Hello;
                 d.deadline = c.now().saturating_add(ANSWER_MS);
@@ -720,6 +861,9 @@ impl Plugin for Esphome {
             } else {
                 self.devices.remove(i).close(c)?;
             }
+        }
+        if matches!(self.multicast, Multicast::Open | Multicast::Bound) {
+            self.drain_multicast(c, None)?;
         }
         for _ in 0..64 {
             let Some(event) = c.poll_stream() else {

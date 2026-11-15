@@ -27,6 +27,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'aarch64-unknown-none-softfloat'
 BUNDLE = os.environ.get('STULP_QEMU_BUNDLE') == '1'
+DOORBELL = None
 PLUGIN_BINARY = 'stulp-all-plugins-hopos' if BUNDLE else 'stulp-virtualdevices-hopos'
 PLUGIN_IDS = ['com.stulp.' + name for name in ('virtualdevices', 'weather', 'somfy', 'nibe', 'spotify', 'notify', 'wiim', 'sigenergy', 'unifi', 'matter', 'esphome')] if BUNDLE else ['com.stulp.virtualdevices']
 OUT = ROOT / ('target/qemu-stulp-bundle' if BUNDLE else 'target/qemu-stulp-controller')
@@ -58,6 +59,9 @@ def exercise(port,boot,start_plugin):
         document.setdefault('system',{})['fixturePadding']='x'*(1200*1024)
         document['apps']=[{'id':plugin_id,'enabled':True} for plugin_id in PLUGIN_IDS]
         document['devices']=[{'id':'switch','name':'QEMU lamp','appId':app,'driverId':'switch','data':{'id':'qemu'},'capabilities':['onoff'],'store':{'onoff':False}}]
+        if BUNDLE:
+            # A doorbell over the plaintext ESPHome API, at the stand-in on the host (slirp 10.0.2.2).
+            document['devices'].append({'id':'bell','name':'QEMU bel','appId':'com.stulp.esphome','driverId':'doorbell','data':{'mac':'c8c9a36abd17'},'settings':{'address':'10.0.2.2'},'capabilities':['alarm_generic','onoff','measure_signal_strength'],'store':{}})
         meta['apps']=[{'id':plugin_id} for plugin_id in PLUGIN_IDS]
         data=io.BytesIO()
         with zipfile.ZipFile(data,'w',compression=zipfile.ZIP_STORED) as z:
@@ -87,6 +91,20 @@ def exercise(port,boot,start_plugin):
             time.sleep(.2)
         else:raise AssertionError('Bundle apps not running: '+str({k:v.get('state') for k,v in states.items()}))
         print('PASS: all eleven bundled plugins running',flush=True)
+        if boot==0:
+            # A plaintext stream from a bundled plugin to a LAN device: open, hello, entities, states.
+            deadline=time.monotonic()+60
+            while time.monotonic()<deadline:
+                bell=json.loads(call('GET','/api/manager/devices/device/bell'))
+                values={k:v.get('value') for k,v in bell['capabilitiesObj'].items()}
+                if bell['available'] and values.get('onoff') is True and values.get('measure_signal_strength')==-66:break
+                time.sleep(.5)
+            else:raise AssertionError('ESPHome doorbell over a plaintext stream: '+json.dumps({k:bell.get(k) for k in ('available','unavailableMessage')})+' '+str(values)+' fake='+str(DOORBELL.connections)+' '+str([k for k,_ in DOORBELL.seen][:20]))
+            print('PASS: ESPHome doorbell over a plaintext stream',flush=True)
+            # Een spawn in een volle takentabel valt stil weg (applib: 64 taken voor de hele bundel).
+            dropped=[l for l in (OUT/'boot-0.log').read_text(errors='replace').splitlines() if 'HOPOS_TASK_DROPPED' in l]
+            assert not dropped,dropped
+            print('PASS: no bundle task dropped',flush=True)
     device=json.loads(call('GET','/api/manager/devices/device/switch'))
     assert device['available'],device
     assert device['capabilitiesObj']['onoff']['value'] is (boot==1),device
@@ -133,6 +151,12 @@ def main():
         raise SystemExit('qemu-system-aarch64 missing')
     OUT.mkdir(parents=True,exist_ok=True)
     (OUT/'checks.json').unlink(missing_ok=True)
+    global DOORBELL
+    if BUNDLE:
+        import sys
+        sys.path.insert(0,str(ROOT/'tests'))
+        from fake_esphome import FakeDoorbell
+        DOORBELL=FakeDoorbell(6053).start()
     evidence={'artifacts':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [kernel,hop,binary,plugin]}}
     with tempfile.TemporaryDirectory(prefix='stulp-qemu-') as directory:
         temporary=Path(directory)

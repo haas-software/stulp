@@ -271,8 +271,7 @@ impl Transport for Connection {
         self.udp.poll()
     }
     fn stream(&mut self, c: stulp_sdk::StreamCommand) -> Result {
-        self.streams.start(self.app, &mut self.env)?;
-        self.streams.command(c)
+        self.streams.command(self.app, &mut self.env, c)
     }
     fn poll_stream(&mut self) -> Option<stulp_sdk::StreamEvent> {
         self.streams.poll()

@@ -123,6 +123,11 @@ struct Fake {
     mdns: Vec<&'static [u8]>,
     searches: usize,
     searching: bool,
+    /// Als op een HopOS-slot: de unicast-vraag krijgt geen antwoord, alleen de
+    /// groep (vanaf 5353) wel. Uit: geen UDP-adapter, zoals de native host zonder.
+    multicast_only: bool,
+    udp: Vec<String>,
+    udp_events: VecDeque<UdpEvent>,
 }
 impl Fake {
     fn reply(&mut self, id: u64, kind: u32, b: Body) {
@@ -305,10 +310,45 @@ impl Transport for Net {
         f.searching = true;
         Ok(())
     }
+    fn udp(&mut self, command: UdpCommand) -> Result {
+        let mut f = self.fake.borrow_mut();
+        if !f.multicast_only {
+            return Err(Error::Transport("UDP socket adapter unavailable"));
+        }
+        match command {
+            UdpCommand::Bind { id, address } => {
+                f.udp.push(alloc::format!("bind {id} {address}"));
+                f.udp_events.push_back(UdpEvent::Bound(id, address));
+            }
+            UdpCommand::JoinV4 { id, group, .. } => {
+                f.udp.push(alloc::format!("join {id} {group:?}"));
+            }
+            UdpCommand::Send { id, address, bytes } => {
+                assert_eq!(bytes, mdns::query().unwrap());
+                f.udp.push(alloc::format!("send {id} {address}"));
+                let answers: Vec<_> = f.mdns.clone();
+                for a in answers {
+                    f.udp_events.push_back(UdpEvent::Data {
+                        id,
+                        address: "192.168.1.71:5353".into(),
+                        bytes: a.to_vec(),
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    fn poll_udp(&mut self) -> Option<UdpEvent> {
+        self.fake.borrow_mut().udp_events.pop_front()
+    }
     fn poll_datagrams(&mut self) -> Option<Result<Vec<Datagram>>> {
         let mut f = self.fake.borrow_mut();
         if !core::mem::take(&mut f.searching) {
             return None;
+        }
+        if f.multicast_only {
+            return Some(Ok(Vec::new()));
         }
         Some(Ok(f
             .mdns
@@ -356,6 +396,9 @@ fn client(devices: &str) -> (Client<Net>, Rc<RefCell<Fake>>) {
         mdns: alloc::vec![mdns::tests::DOORBELL],
         searches: 0,
         searching: false,
+        multicast_only: false,
+        udp: Vec::new(),
+        udp_events: VecDeque::new(),
     }));
     let net = Net {
         wire: c.into_transport(),
@@ -640,5 +683,32 @@ fn a_generic_device_gets_its_tiles_from_the_entity_list() {
     assert_eq!(
         field(state(&c), "onoff.doorbell_chime_active").as_bool(),
         Some(true)
+    );
+}
+
+/// Op de node: de unicast-vraag levert niets (het antwoord gaat naar het
+/// slotadres, dat het LAN niet kent); de vraag vanaf 5353 aan de groep wel.
+#[test]
+fn on_a_hopos_slot_the_doorbell_is_found_through_the_group() {
+    let mut p = Esphome::default();
+    let (mut c, fake) = client("[]");
+    fake.borrow_mut().multicast_only = true;
+    let list = handle(&mut p, &mut c, "pair.list", r#"{"driverId":"doorbell"}"#).unwrap();
+    let list = list.as_array().unwrap();
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert_eq!(
+        json::text(field(&list[0], "store"), "address"),
+        "192.168.1.71"
+    );
+    // Eén keer binden en lid worden; elke ronde één vraag aan de groep.
+    handle(&mut p, &mut c, "pair.list", r#"{"driverId":"doorbell"}"#).unwrap();
+    assert_eq!(
+        fake.borrow().udp,
+        [
+            "bind 1 0.0.0.0:5353",
+            "join 1 [224, 0, 0, 251]",
+            "send 1 224.0.0.251:5353",
+            "send 1 224.0.0.251:5353",
+        ]
     );
 }

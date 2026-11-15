@@ -1,4 +1,10 @@
-//! Eight fixed stream workers; backpressure and generation-scoped command routing.
+//! Up to eight stream workers per plugin, each started when a stream first
+//! needs its slot; backpressure and generation-scoped command routing.
+//!
+//! Lazily, for the same reason as the request workers: the bundle shares one
+//! executor of 64 tasks, and a spawn into a full table is silently dropped.
+//! Eight idle workers per streaming plugin left the doorbell's stream with no
+//! worker at all: its Open was never read, and its slot never came free.
 use alloc::{collections::VecDeque, vec::Vec};
 use applib::{App, EXEC};
 use core::{cell::Cell, time::Duration};
@@ -7,7 +13,8 @@ use leanhttp::{AsyncRead, AsyncWrite, Dial as _};
 use stulp_sdk::{Error, Result, StreamCommand as Command, StreamEvent as Event};
 pub(super) struct Queues {
     generation: Local<Cell<u64>>,
-    started: Local<Cell<u8>>,
+    /// Welke werkers al draaien, één bit per plaats.
+    spawned: Local<Cell<u8>>,
     input: [Local<Mailbox<(u64, Command), 32>>; 8],
     output: Local<Mailbox<(u64, Event), 64>>,
     /// Gaat af als er een gebeurtenis in `output` ligt: de wek van het transport.
@@ -20,7 +27,7 @@ impl Queues {
     const fn new() -> Self {
         Self {
             generation: Local::new(Cell::new(0)),
-            started: Local::new(Cell::new(0)),
+            spawned: Local::new(Cell::new(0)),
             input: [const { Local::new(Mailbox::new()) }; 8],
             output: Local::new(Mailbox::new()),
             ready: Local::new(Signal::new()),
@@ -49,23 +56,12 @@ impl Streams {
             highest: 0,
         })
     }
-    pub(super) fn start(
-        &self,
+    pub(super) fn command(
+        &mut self,
         app: &'static App,
         env: &mut crate::environment::Environment,
+        c: Command,
     ) -> Result {
-        match self.queues.started.get().get() {
-            2 => return Ok(()),
-            0 => (),
-            _ => return Err(Error::Transport("stream worker startup failed")),
-        }
-        // Een gedeeltelijke start mag nooit een tweede consument op dezelfde rij starten.
-        self.queues.started.get().set(1);
-        start(self.queues, app, env)?;
-        self.queues.started.get().set(2);
-        Ok(())
-    }
-    pub(super) fn command(&mut self, c: Command) -> Result {
         let id = match &c {
             Command::Open { id, .. } | Command::Write { id, .. } | Command::Close { id } => *id,
         };
@@ -100,6 +96,9 @@ impl Streams {
             },
         };
         let open = matches!(&c, Command::Open { .. });
+        if open {
+            self.ensure(app, env, index)?;
+        }
         self.queues.input[index]
             .try_send((self.generation, c))
             .map_err(|_| Error::Transport("stream command queue full"))?;
@@ -107,6 +106,24 @@ impl Streams {
             self.ids[index] = id;
             self.highest = id;
         }
+        Ok(())
+    }
+    /// Start de werker van plaats `worker` als die nog niet draait.
+    fn ensure(
+        &self,
+        app: &'static App,
+        env: &mut crate::environment::Environment,
+        worker: usize,
+    ) -> Result {
+        let bit = 1_u8 << worker;
+        if self.queues.spawned.get().get() & bit != 0 {
+            return Ok(());
+        }
+        spawn(self.queues, app, env, worker)?;
+        self.queues
+            .spawned
+            .get()
+            .set(self.queues.spawned.get().get() | bit);
         Ok(())
     }
     /// Klaar zodra een werker een gebeurtenis klaarzette.
@@ -167,16 +184,21 @@ async fn emit(owner: &Queues, worker: usize, g: u64, e: Event) -> bool {
         .await;
     }
 }
-fn start(
+fn spawn(
     owner: &'static Queues,
     app: &'static App,
     env: &mut crate::environment::Environment,
+    worker: usize,
 ) -> Result {
     let index = QUEUES
         .iter()
         .position(|q| core::ptr::eq(q, owner))
         .unwrap_or(0);
-    for (worker, input) in owner.input.iter().enumerate() {
+    let input = owner
+        .input
+        .get(worker)
+        .ok_or(Error::Invalid("stream worker index out of range"))?;
+    {
         let mut dial = crate::network::Dial::new(app, &env.random());
         EXEC.get()
             .spawn(super::timed(app, index, "io", async move {
@@ -207,7 +229,11 @@ fn start(
                     .await;
                     let mut conn = match opened {
                         Either::Left(Ok(c)) => c,
-                        _ => {
+                        failed => {
+                            app.log(format_args!(
+                                "STULP_STREAM_DIAL_FAIL index={index} worker={worker} host={host} port={port} tls={tls} why={}",
+                                if matches!(failed, Either::Left(_)) { "dial" } else { "timeout" }
+                            ));
                             emit(
                                 owner,
                                 worker,
@@ -238,6 +264,9 @@ fn start(
             }))
             .map_err(|_| Error::Transport("stream worker unavailable"))?;
     }
+    app.log(format_args!(
+        "STULP_STREAM_WORKER index={index} worker={worker}"
+    ));
     Ok(())
 }
 async fn active(

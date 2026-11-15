@@ -1,4 +1,9 @@
-//! Four fixed workers; generation tags prevent replies crossing attach lifetimes.
+//! Up to four workers per plugin, each started the first time its kind of
+//! request is made; generation tags prevent replies crossing attach lifetimes.
+//!
+//! Lazily, because the bundle shares one applib executor of 64 tasks: four
+//! idle workers for each of eleven plugins left five free, and a spawn that
+//! finds the table full is dropped without an error (HOPOS_TASK_DROPPED).
 use alloc::{string::String, vec::Vec};
 use applib::{
     App, EXEC,
@@ -13,6 +18,10 @@ use stulp_sdk::{
 pub(super) struct Queues {
     generation: Local<Cell<u64>>,
     started: Local<Cell<bool>>,
+    /// Wat een werker nodig heeft om te starten, gezet door [`start`].
+    spawner: Local<Cell<Option<Spawner>>>,
+    /// Welke werkers al draaien, één bit per soort.
+    spawned: Local<Cell<u8>>,
     /// Gaat af als een antwoord klaarstaat: de wek van het plugin-transport.
     done: Local<Signal>,
     /// Gaat af als de attach wisselt, één bel per werker (een `Signal` kent
@@ -32,6 +41,8 @@ impl Queues {
         Self {
             generation: Local::new(Cell::new(0)),
             started: Local::new(Cell::new(false)),
+            spawner: Local::new(Cell::new(None)),
+            spawned: Local::new(Cell::new(0)),
             done: Local::new(Signal::new()),
             closed: [const { Local::new(Signal::new()) }; WORKERS],
             http: Local::new(Mailbox::new()),
@@ -136,6 +147,7 @@ impl Requests {
         {
             return Err(Error::Invalid("HTTP request exceeds bounds"));
         }
+        self.queues.ensure(HTTP)?;
         send(&self.queues.http, self.generation, r, &mut self.http)
     }
     pub(super) fn poll_http(&mut self) -> Option<Result<HttpResponse>> {
@@ -155,6 +167,7 @@ impl Requests {
         {
             return Err(Error::Invalid("TCP request exceeds bounds"));
         }
+        self.queues.ensure(TCP)?;
         send(&self.queues.tcp, self.generation, r, &mut self.tcp)
     }
     pub(super) fn poll_tcp(&mut self) -> Option<Result<Vec<u8>>> {
@@ -167,6 +180,7 @@ impl Requests {
         if r.len() > 320 {
             return Err(Error::Invalid("DNS address too long"));
         }
+        self.queues.ensure(DNS)?;
         send(&self.queues.dns, self.generation, r, &mut self.dns)
     }
     pub(super) fn poll_resolve(&mut self) -> Option<Result<Vec<String>>> {
@@ -179,6 +193,7 @@ impl Requests {
         if r.payload.len() > 8192 || r.timeout_ms == 0 || r.timeout_ms > 30000 {
             return Err(Error::Invalid("discovery request exceeds bounds"));
         }
+        self.queues.ensure(BROWSE)?;
         send(&self.queues.browse, self.generation, r, &mut self.browse)
     }
     pub(super) fn poll_datagrams(&mut self) -> Option<Result<Vec<Datagram>>> {
@@ -277,6 +292,15 @@ async fn until<T>(
         Either::Right(error) => Err(error),
     }
 }
+/// Het zaad voor de dialers en de index van de plugin: genoeg om een werker
+/// pas te starten wanneer zijn soort verzoek voor het eerst komt.
+#[derive(Clone, Copy)]
+struct Spawner {
+    app: &'static App,
+    index: usize,
+    dial: [u8; 32],
+    h2: [u8; 32],
+}
 pub(super) fn start(
     index: usize,
     app: &'static App,
@@ -288,77 +312,119 @@ pub(super) fn start(
     if owner.started.get().replace(true) {
         return Err(Error::Invalid("plugin I/O already started"));
     }
-    let dial = crate::network::Dial::new(app, &env.random());
-    // APNs spreekt alleen HTTP/2: een eigen TLS-sessie met ALPN `h2`, buiten
-    // de keep-alive-pool, één verzoek per verbinding (zie stulp-h2).
-    let mut h2 = crate::network::Dial::new(app, &env.random());
-    EXEC.get()
-        .spawn(super::timed(app, index, "io", async move {
-            // Keep-alive: de pool van leanhttp (twee ruststaande verbindingen
-            // per host, acht totaal, dertig seconden) spaart per poll een
-            // TLS-handshake uit. Op de LicheeRV kostte elke handshake naar
-            // Spotify of TaHoma 160 tot 630 ms rekenen in één adem, bij
-            // elke aanroep opnieuw (02-10, STULP_TLS).
-            let mut client = leanhttp::Client::new(dial);
-            loop {
-                let (id, r) = owner.http.recv().await;
-                let ms = r.timeout_ms;
-                let result = if r.http2 {
-                    until(owner, HTTP, id, ms, h2.h2(&r)).await
-                } else {
-                    until(owner, HTTP, id, ms, http(&mut client, r)).await
-                };
-                answer(owner, &owner.http_out, id, result);
-            }
-        }))
-        .map_err(|_| Error::Transport("HTTP worker unavailable"))?;
-    EXEC.get()
-        .spawn(super::timed(app, index, "io", async move {
-            let mut socket = None;
-            let mut identity = (0, String::new(), 0);
-            loop {
-                let (id, r) = owner.tcp.recv().await;
-                if identity.0 != id || identity.1 != r.address || identity.2 != r.generation {
-                    socket = None;
-                    identity = (
-                        id,
-                        match json::copy(&r.address) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                answer(owner, &owner.tcp_out, id, Err(e.into()));
-                                continue;
-                            }
-                        },
-                        r.generation,
-                    );
-                }
-                let result = until(owner, TCP, id, r.timeout_ms, tcp(&mut socket, r)).await;
-                if result.is_err() {
-                    socket = None;
-                }
-                answer(owner, &owner.tcp_out, id, result);
-            }
-        }))
-        .map_err(|_| Error::Transport("TCP worker unavailable"))?;
-    EXEC.get()
-        .spawn(super::timed(app, index, "io", async move {
-            loop {
-                let (id, r) = owner.dns.recv().await;
-                let result = until(owner, DNS, id, 5000, resolve_addresses(&r)).await;
-                answer(owner, &owner.dns_out, id, result);
-            }
-        }))
-        .map_err(|_| Error::Transport("DNS worker unavailable"))?;
-    EXEC.get()
-        .spawn(super::timed(app, index, "io", async move {
-            loop {
-                let (id, r) = owner.browse.recv().await;
-                let result = browse(owner, id, r).await;
-                answer(owner, &owner.browse_out, id, result);
-            }
-        }))
-        .map_err(|_| Error::Transport("discovery worker unavailable"))?;
+    owner.spawner.get().set(Some(Spawner {
+        app,
+        index,
+        dial: env.random(),
+        h2: env.random(),
+    }));
     Ok(owner)
+}
+impl Queues {
+    /// Start de werker van `kind` als die nog niet draait.
+    fn ensure(&'static self, kind: usize) -> Result {
+        let bit = 1_u8 << kind;
+        if self.spawned.get().get() & bit != 0 {
+            return Ok(());
+        }
+        let s = self
+            .spawner
+            .get()
+            .get()
+            .ok_or(Error::Transport("plugin I/O not started"))?;
+        spawn_worker(self, kind, s)?;
+        self.spawned.get().set(self.spawned.get().get() | bit);
+        s.app.log(format_args!(
+            "STULP_IO_WORKER index={} kind={}",
+            s.index,
+            ["http", "tcp", "dns", "browse"]
+                .get(kind)
+                .copied()
+                .unwrap_or("?")
+        ));
+        Ok(())
+    }
+}
+fn spawn_worker(owner: &'static Queues, kind: usize, s: Spawner) -> Result {
+    let (app, index) = (s.app, s.index);
+    match kind {
+        HTTP => {
+            let dial = crate::network::Dial::new(app, &s.dial);
+            // APNs spreekt alleen HTTP/2: een eigen TLS-sessie met ALPN `h2`, buiten
+            // de keep-alive-pool, één verzoek per verbinding (zie stulp-h2).
+            let mut h2 = crate::network::Dial::new(app, &s.h2);
+            EXEC.get()
+                .spawn(super::timed(app, index, "io", async move {
+                    // Keep-alive: de pool van leanhttp (twee ruststaande verbindingen
+                    // per host, acht totaal, dertig seconden) spaart per poll een
+                    // TLS-handshake uit. Op de LicheeRV kostte elke handshake naar
+                    // Spotify of TaHoma 160 tot 630 ms rekenen in één adem, bij
+                    // elke aanroep opnieuw (02-10, STULP_TLS).
+                    let mut client = leanhttp::Client::new(dial);
+                    loop {
+                        let (id, r) = owner.http.recv().await;
+                        let ms = r.timeout_ms;
+                        let result = if r.http2 {
+                            until(owner, HTTP, id, ms, h2.h2(&r)).await
+                        } else {
+                            until(owner, HTTP, id, ms, http(&mut client, r)).await
+                        };
+                        answer(owner, &owner.http_out, id, result);
+                    }
+                }))
+                .map_err(|_| Error::Transport("HTTP worker unavailable"))
+        }
+        TCP => EXEC
+            .get()
+            .spawn(super::timed(app, index, "io", async move {
+                let mut socket = None;
+                let mut identity = (0, String::new(), 0);
+                loop {
+                    let (id, r) = owner.tcp.recv().await;
+                    if identity.0 != id || identity.1 != r.address || identity.2 != r.generation {
+                        socket = None;
+                        identity = (
+                            id,
+                            match json::copy(&r.address) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    answer(owner, &owner.tcp_out, id, Err(e.into()));
+                                    continue;
+                                }
+                            },
+                            r.generation,
+                        );
+                    }
+                    let result = until(owner, TCP, id, r.timeout_ms, tcp(&mut socket, r)).await;
+                    if result.is_err() {
+                        socket = None;
+                    }
+                    answer(owner, &owner.tcp_out, id, result);
+                }
+            }))
+            .map_err(|_| Error::Transport("TCP worker unavailable")),
+        DNS => EXEC
+            .get()
+            .spawn(super::timed(app, index, "io", async move {
+                loop {
+                    let (id, r) = owner.dns.recv().await;
+                    let result = until(owner, DNS, id, 5000, resolve_addresses(&r)).await;
+                    answer(owner, &owner.dns_out, id, result);
+                }
+            }))
+            .map_err(|_| Error::Transport("DNS worker unavailable")),
+        BROWSE => EXEC
+            .get()
+            .spawn(super::timed(app, index, "io", async move {
+                loop {
+                    let (id, r) = owner.browse.recv().await;
+                    let result = browse(owner, id, r).await;
+                    answer(owner, &owner.browse_out, id, result);
+                }
+            }))
+            .map_err(|_| Error::Transport("discovery worker unavailable")),
+        _ => Err(Error::Invalid("unknown request worker")),
+    }
 }
 async fn http(
     client: &mut leanhttp::Client<crate::network::Dial>,
@@ -545,6 +611,9 @@ mod tests {
     fn bundle_replies_and_disconnects_stay_with_their_plugin() -> Result {
         static A: Queues = Queues::new();
         static B: Queues = Queues::new();
+        // Host tests start no executor: the workers count as running.
+        A.spawned.get().set(0xf);
+        B.spawned.get().set(0xf);
         let mut a = Requests::new(&A);
         let mut b = Requests::new(&B);
         a.resolve(json::copy("one:80")?)?;
@@ -591,5 +660,15 @@ mod tests {
         ));
         assert!(!touched.get());
         assert_eq!(Q.generation.get().get(), current.generation);
+    }
+
+    #[test]
+    fn a_worker_starts_only_for_the_kind_that_is_used() {
+        static C: Queues = Queues::new();
+        let mut c = Requests::new(&C);
+        // Nothing started yet, and no start(): the request fails instead of
+        // waiting on a worker that does not exist.
+        assert!(c.resolve(alloc::string::String::from("one:80")).is_err());
+        assert_eq!(C.spawned.get().get(), 0);
     }
 }
