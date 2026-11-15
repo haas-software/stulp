@@ -69,6 +69,27 @@ struct ClientTests {
         #expect(try await client.appSetting("com.stulp.notify", "apnsKeyId") == .null)
     }
 
+    /// Without apnsKey and apnsKeyId Stulp sends nothing; the app writes both, the key first.
+    @Test func pushKeyIsStoredInTheNotificationsApp() async throws {
+        let (client, host) = StubProtocol.client { seen in
+            seen.method == "GET" ? .json(#"{"error":"missing"}"#, status: 404) : .json("true")
+        }
+        #expect(try await client.pushKeyId() == nil)
+        let pem = "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----\n"
+        #expect(PushKey.keyId(fromFileName: "AuthKey_AB12CD34EF.p8") == "AB12CD34EF")
+        #expect(PushKey.keyId(fromFileName: "sleutel.p8") == nil)
+        #expect(PushKey(pem: "geen sleutel", keyId: "AB12CD34EF") == nil)
+        #expect(PushKey(pem: pem, keyId: "AB12") == nil)
+        let key = try #require(PushKey(pem: pem, keyId: "ab12cd34ef"))
+        try await client.setPushKey(key)
+        let writes = StubProtocol.requests(host).filter { $0.method == "PUT" }
+        #expect(writes.map(\.path) == [
+            "/api/manager/apps/app/com.stulp.notify/setting/apnsKey",
+            "/api/manager/apps/app/com.stulp.notify/setting/apnsKeyId",
+        ])
+        #expect(writes.last?.json == ["value": "AB12CD34EF"])
+    }
+
     @Test func driversReadFromAMap() async throws {
         let (client, _) = StubProtocol.client { _ in
             .json(#"""

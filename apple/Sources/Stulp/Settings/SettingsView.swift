@@ -110,6 +110,13 @@ private struct PhoneSections: View {
     @State private var phones: [Device] = []
     @State private var newName = ""
     @State private var working = false
+    /// The APNs key Stulp signs with: nil while unknown, "" when there is none.
+    @State private var pushKeyId: String?
+    @State private var importingKey = false
+    /// A key file whose name no longer carries the key id; the id is typed in.
+    @State private var pendingPEM: String?
+    @State private var pendingKeyId = ""
+    @State private var testing = false
     private var monitor: PresenceMonitor { .shared }
     private var push: PushCenter { .shared }
 
@@ -119,8 +126,15 @@ private struct PhoneSections: View {
             presenceSection
             chargerSection
             notificationSection
+            pushKeySection
         }
-        .task { await loadPhones() }
+        .task {
+            await loadPhones()
+            await loadPushKey()
+        }
+        .fileImporter(isPresented: $importingKey, allowedContentTypes: [.data]) { result in
+            Task { await importKey(result) }
+        }
     }
 
     private var phoneSection: some View {
@@ -248,7 +262,102 @@ private struct PhoneSections: View {
         }
     }
 
+    /// Stulp signs every notification with an APNs key of the developer account; without one
+    /// Apple accepts nothing. It lives in the notifications app's settings, set from here.
+    private var pushKeySection: some View {
+        Section {
+            switch pushKeyId {
+            case nil:
+                LabeledContent("Pushsleutel", value: "…")
+            case let id? where id.isEmpty:
+                Label("Stulp heeft nog geen pushsleutel", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            case let id?:
+                LabeledContent("Pushsleutel", value: id)
+            }
+            if let pendingPEM {
+                HStack {
+                    TextField("Key ID, 10 tekens", text: $pendingKeyId)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .onSubmit { Task { await saveKey(pem: pendingPEM, keyId: pendingKeyId) } }
+                    Button("Bewaar") { Task { await saveKey(pem: pendingPEM, keyId: pendingKeyId) } }
+                        .disabled(!PushKey.isKeyId(pendingKeyId.trimmingCharacters(in: .whitespaces).uppercased()) || working)
+                }
+            }
+            Button {
+                importingKey = true
+            } label: {
+                Label(pushKeyId?.isEmpty == false ? "Vervang de pushsleutel…" : "Kies het .p8-bestand…", systemImage: "key")
+            }
+            .disabled(working || pushKeyId == nil)
+            if let presence {
+                Button {
+                    Task { await test(presence.phoneId, name: presence.phoneName) }
+                } label: {
+                    Label("Stuur testmelding", systemImage: "bell.badge")
+                }
+                .disabled(testing || pushKeyId?.isEmpty != false)
+            }
+        } header: {
+            Text("Pushsleutel van Apple")
+        } footer: {
+            Text("Eenmalig, voor alle telefoons samen. Maak op developer.apple.com bij Certificates, IDs & Profiles → Keys een sleutel met Apple Push Notifications service (APNs), omgeving Sandbox & Production, en kies hier het gedownloade AuthKey_….p8. De sleutel gaat naar Stulp en blijft niet op deze telefoon.")
+        }
+    }
+
     // MARK: Actions
+
+    private func loadPushKey() async {
+        guard let client = model.client else { return }
+        do { pushKeyId = try await client.pushKeyId() ?? "" } catch { model.report(error) }
+    }
+
+    private func importKey(_ result: Result<URL, any Error>) async {
+        do {
+            let url = try result.get()
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let pem = try String(contentsOf: url, encoding: .utf8)
+            guard PushKey.isPEM(pem) else {
+                model.notice = .init(text: "Dat is geen APNs-sleutel: kies het AuthKey_….p8 dat Apple je liet downloaden.", isError: true)
+                return
+            }
+            if let id = PushKey.keyId(fromFileName: url.lastPathComponent) {
+                await saveKey(pem: pem, keyId: id)
+            } else {
+                // Renamed after the download: Apple shows the id next to the key.
+                pendingPEM = pem
+                pendingKeyId = ""
+            }
+        } catch {
+            model.report(error)
+        }
+    }
+
+    private func saveKey(pem: String, keyId: String) async {
+        guard let key = PushKey(pem: pem, keyId: keyId), let client = model.client else { return }
+        working = true
+        defer { working = false }
+        do {
+            try await client.setPushKey(key)
+            pendingPEM = nil
+            pendingKeyId = ""
+            pushKeyId = key.keyId
+            model.notice = .init(text: "Stulp heeft de pushsleutel \(key.keyId).", isError: false)
+            if let presence { await test(presence.phoneId, name: presence.phoneName) }
+        } catch {
+            model.report(error)
+        }
+    }
+
+    private func test(_ phoneId: String, name: String) async {
+        testing = true
+        defer { testing = false }
+        await model.perform("Testmelding verstuurd naar \(name).") {
+            try await $0.testNotification(deviceId: phoneId)
+        }
+    }
 
     private func loadPhones() async {
         guard let client = model.client else { return }

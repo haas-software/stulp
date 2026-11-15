@@ -12,8 +12,9 @@ use stulp_sdk::{
 /// De telefoons met de Stulp-app, en het APNs-provider-token zolang het geldt.
 #[derive(Default)]
 pub struct Notify {
-    /// Provider-token voor APNs en het moment van uitgifte (wandklok, seconden).
-    apns: Option<(String, u64)>,
+    /// Provider-token voor APNs, de sleutel-id waarmee het getekend is en het moment van
+    /// uitgifte (wandklok, seconden). Een andere sleutel in de instellingen maakt het ongeldig.
+    apns: Option<(String, String, u64)>,
     phones: Vec<String>,
 }
 /// De toestand die de iOS-app van de telefoon meldt, als booleans.
@@ -37,11 +38,6 @@ impl Notify {
     /// Het provider-token voor APNs, hergebruikt tot het half verlopen is.
     fn apns_token<T: Transport>(&mut self, c: &mut Client<T>) -> Result<String> {
         let now = c.wall_time()?;
-        if let Some((token, issued)) = &self.apns
-            && now.saturating_sub(*issued) < apns::TOKEN_SECONDS
-        {
-            return Ok(json::copy(token)?);
-        }
         let setting = |key: &str| {
             c.state()
                 .setting(key)
@@ -57,12 +53,18 @@ impl Notify {
         };
         if pem.is_empty() || key_id.is_empty() {
             return Err(Error::Invalid(
-                "Meldingen via de app: stel apnsKey en apnsKeyId in bij de Meldingen-app.",
+                "Stulp heeft nog geen pushsleutel van Apple: kies het .p8-bestand in de Stulp-app bij Instellingen, Pushsleutel van Apple.",
             ));
+        }
+        if let Some((token, signed_with, issued)) = &self.apns
+            && signed_with == key_id
+            && now.saturating_sub(*issued) < apns::TOKEN_SECONDS
+        {
+            return Ok(json::copy(token)?);
         }
         let key = apns::key_from_p8(pem)?;
         let token = apns::token(&key, key_id, team_id, now)?;
-        self.apns = Some((json::copy(&token)?, now));
+        self.apns = Some((json::copy(&token)?, json::copy(key_id)?, now));
         Ok(token)
     }
     async fn send_apns<T: Transport>(

@@ -100,3 +100,48 @@ fn a_phone_without_the_app_gets_no_notification_and_no_pairing() {
     );
     assert!(c.into_transport().http.is_empty());
 }
+#[test]
+fn a_replaced_key_signs_the_next_notification() {
+    let mut w = wire(r#"{"apns.token":"abcdef0123","apns.environment":"production"}"#);
+    for _ in 0..3 {
+        w.reply(200, "", false);
+    }
+    let mut c = w.reconnect("com.stulp.notify", Notify::default().manifest());
+    let mut p = Notify::default();
+    handle(&mut p, &mut c, "device.init", r#"{"deviceId":"phone"}"#).unwrap();
+    handle(&mut p, &mut c, "flow.run", SEND).unwrap();
+    handle(&mut p, &mut c, "flow.run", SEND).unwrap();
+    // De app zet een nieuwe sleutel; het provider-token van de oude mag niet blijven hangen.
+    stulp_platform::host::block_on(c.setting("apnsKeyId", json::string("KLMNOPQRST").unwrap()))
+        .unwrap();
+    handle(&mut p, &mut c, "flow.run", SEND).unwrap();
+    let w = c.into_transport();
+    let auth: Vec<&str> = w
+        .http
+        .iter()
+        .map(|r| {
+            r.headers
+                .iter()
+                .find(|(k, _)| k == "authorization")
+                .unwrap()
+                .1
+                .as_str()
+        })
+        .collect();
+    assert_eq!(auth.len(), 3);
+    assert_eq!(auth[0], auth[1]);
+    assert_ne!(auth[1], auth[2]);
+}
+#[test]
+fn without_a_key_the_message_says_where_to_set_it() {
+    let mut c = Wire::client(
+        "com.stulp.notify",
+        Notify::default().manifest(),
+        r#"[{"id":"phone","appId":"com.stulp.notify","driverId":"phone","name":"Test","data":{"kind":"app"},"store":{"apns.token":"abcdef0123","apns.environment":"production"},"capabilities":["onoff"]}]"#,
+        "null",
+    );
+    let mut p = Notify::default();
+    handle(&mut p, &mut c, "device.init", r#"{"deviceId":"phone"}"#).unwrap();
+    let text = stulp_sdk::message(&handle(&mut p, &mut c, "flow.run", SEND).unwrap_err()).unwrap();
+    assert!(text.contains("Pushsleutel van Apple"), "{text}");
+}

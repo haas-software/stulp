@@ -396,6 +396,52 @@ public struct StulpClient: Sendable {
     public func testNotification(deviceId: String) async throws {
         _ = try await appAPI("com.stulp.notify", method: "POST", path: "test", body: ["deviceId": .string(deviceId)])
     }
+
+    /// The id of the APNs key Stulp signs notifications with, or nil while there is none: without
+    /// it no notification leaves Stulp. The key itself stays in Stulp; only the id is read back.
+    public func pushKeyId() async throws -> String? {
+        guard case .string(let id) = try await appSetting("com.stulp.notify", "apnsKeyId"), !id.isEmpty,
+              case .string(let pem) = try await appSetting("com.stulp.notify", "apnsKey"), !pem.isEmpty
+        else { return nil }
+        return id
+    }
+
+    /// Stores the APNs key in the notifications app's settings (apnsKey, apnsKeyId), the key
+    /// first, so a half-written pair never names a key that is not there.
+    public func setPushKey(_ key: PushKey) async throws {
+        try await setAppSetting("com.stulp.notify", "apnsKey", .string(key.pem))
+        try await setAppSetting("com.stulp.notify", "apnsKeyId", .string(key.keyId))
+    }
+}
+
+/// An APNs authentication key as Apple hands it out: `AuthKey_<KEY ID>.p8`, a PKCS#8 PEM.
+public struct PushKey: Equatable, Sendable {
+    public let pem: String
+    public let keyId: String
+
+    public init?(pem: String, keyId: String) {
+        let pem = pem.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyId = keyId.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard Self.isPEM(pem), Self.isKeyId(keyId) else { return nil }
+        self.pem = pem
+        self.keyId = keyId
+    }
+
+    /// The key id Apple put in the file name, if the file still has that name.
+    public static func keyId(fromFileName name: String) -> String? {
+        guard let range = name.range(of: "AuthKey_") else { return nil }
+        let id = String(name[range.upperBound...].prefix { $0.isLetter || $0.isNumber }).uppercased()
+        return isKeyId(id) ? id : nil
+    }
+
+    public static func isPEM(_ text: String) -> Bool {
+        text.contains("-----BEGIN PRIVATE KEY-----") && text.contains("-----END PRIVATE KEY-----")
+    }
+
+    /// Ten letters and digits, as Apple shows it under Keys.
+    public static func isKeyId(_ id: String) -> Bool {
+        id.count == 10 && id.allSatisfy { ($0.isASCII && $0.isUppercase) || $0.isNumber }
+    }
 }
 
 struct ServerError: Decodable, Sendable {
