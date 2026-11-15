@@ -32,7 +32,7 @@ calls. Pinned, vendored crypto provenance is in `crates/apns/PROVENANCE.md`.
 ```
 
 Release output: `target/release/stulp-host` and `stulp-{virtualdevices,weather,
-somfy,nibe,spotify,notify,wiim,sigenergy,unifi,matter}` in the same directory.
+somfy,nibe,spotify,notify,wiim,sigenergy,unifi,matter,esphome}` in the same directory.
 Use a separate document for development:
 
 ```sh

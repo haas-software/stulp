@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'aarch64-unknown-none-softfloat'
 BUNDLE = os.environ.get('STULP_QEMU_BUNDLE') == '1'
 PLUGIN_BINARY = 'stulp-all-plugins-hopos' if BUNDLE else 'stulp-virtualdevices-hopos'
-PLUGIN_IDS = ['com.stulp.' + name for name in ('virtualdevices', 'weather', 'somfy', 'nibe', 'spotify', 'notify', 'wiim', 'sigenergy', 'unifi', 'matter')] if BUNDLE else ['com.stulp.virtualdevices']
+PLUGIN_IDS = ['com.stulp.' + name for name in ('virtualdevices', 'weather', 'somfy', 'nibe', 'spotify', 'notify', 'wiim', 'sigenergy', 'unifi', 'matter', 'esphome')] if BUNDLE else ['com.stulp.virtualdevices']
 OUT = ROOT / ('target/qemu-stulp-bundle' if BUNDLE else 'target/qemu-stulp-controller')
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -86,7 +86,7 @@ def exercise(port,boot,start_plugin):
             if all(states.get(app_id,{}).get('state')=='running' for app_id in PLUGIN_IDS):break
             time.sleep(.2)
         else:raise AssertionError('Bundle apps not running: '+str({k:v.get('state') for k,v in states.items()}))
-        print('PASS: all ten bundled plugins running',flush=True)
+        print('PASS: all eleven bundled plugins running',flush=True)
     device=json.loads(call('GET','/api/manager/devices/device/switch'))
     assert device['available'],device
     assert device['capabilitiesObj']['onoff']['value'] is (boot==1),device

@@ -13,8 +13,8 @@ mod media;
 mod requests;
 mod streams;
 mod udp;
-/// De tien plugins delen een netstack, maar nooit hun I/O-antwoorden.
-pub const BUNDLE_CAP: usize = 10;
+/// De elf plugins delen een netstack, maar nooit hun I/O-antwoorden.
+pub const BUNDLE_CAP: usize = 11;
 /// Rekentijd per plugin in de bundel, in nanoseconden: de som van zijn
 /// executor-beurten. De meter zet het verschil per 30 s in `STULP_LOAD`.
 static BUSY_NS: [core::sync::atomic::AtomicU64; BUNDLE_CAP] =

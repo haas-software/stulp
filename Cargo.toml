@@ -28,6 +28,7 @@ members = [
     "plugins/sigenergy",
     "plugins/unifi",
     "plugins/matter",
+    "plugins/esphome",
 ]
 
 [workspace.package]

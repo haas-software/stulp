@@ -1,0 +1,145 @@
+{
+  "id": "com.stulp.esphome",
+  "version": "1.0.0",
+  "sdk": 3,
+  "compatibility": ">=1.0.0",
+  "name": {
+    "en": "ESPHome",
+    "nl": "ESPHome"
+  },
+  "description": {
+    "en": "ESPHome devices on your own network, such as a smart doorbell, over their local API",
+    "nl": "ESPHome-apparaten op je eigen netwerk, zoals een slimme deurbel, via hun lokale API"
+  },
+  "author": {
+    "name": "Stulp"
+  },
+  "category": [
+    "security",
+    "tools"
+  ],
+  "capabilities": {
+    "measure_signal_strength": {
+      "type": "number",
+      "title": {
+        "en": "WiFi signal",
+        "nl": "WiFi-signaal"
+      },
+      "units": "dBm",
+      "getable": true,
+      "setable": false
+    }
+  },
+  "drivers": [
+    {
+      "id": "doorbell",
+      "name": {
+        "en": "Doorbell",
+        "nl": "Deurbel"
+      },
+      "class": "doorbell",
+      "capabilities": [
+        "alarm_generic",
+        "onoff",
+        "measure_signal_strength"
+      ],
+      "capabilitiesOptions": {
+        "alarm_generic": {
+          "title": {
+            "en": "Ringing",
+            "nl": "Er wordt aangebeld"
+          }
+        },
+        "onoff": {
+          "title": {
+            "en": "Indoor chime",
+            "nl": "Gong binnen"
+          }
+        }
+      },
+      "settings": [
+        {
+          "id": "address",
+          "type": "text",
+          "label": {
+            "en": "Address",
+            "nl": "Adres"
+          },
+          "value": "",
+          "hint": {
+            "en": "Leave empty: Stulp finds the doorbell on the network by itself. Only fill in an IP address when that does not work.",
+            "nl": "Laat leeg: Stulp vindt de deurbel zelf op het netwerk. Vul alleen een IP-adres in als dat niet lukt."
+          }
+        }
+      ],
+      "pair": [
+        {
+          "id": "list_devices",
+          "template": "list_devices",
+          "navigation": {
+            "next": "add_devices"
+          }
+        },
+        {
+          "id": "add_devices",
+          "template": "add_devices"
+        }
+      ]
+    },
+    {
+      "id": "device",
+      "name": {
+        "en": "ESPHome device",
+        "nl": "ESPHome-apparaat"
+      },
+      "class": "sensor",
+      "capabilities": [],
+      "settings": [
+        {
+          "id": "address",
+          "type": "text",
+          "label": {
+            "en": "Address",
+            "nl": "Adres"
+          },
+          "value": "",
+          "hint": {
+            "en": "Leave empty: Stulp finds the device on the network by itself. Only fill in an IP address when that does not work.",
+            "nl": "Laat leeg: Stulp vindt het apparaat zelf op het netwerk. Vul alleen een IP-adres in als dat niet lukt."
+          }
+        }
+      ],
+      "pair": [
+        {
+          "id": "list_devices",
+          "template": "list_devices",
+          "navigation": {
+            "next": "add_devices"
+          }
+        },
+        {
+          "id": "add_devices",
+          "template": "add_devices"
+        }
+      ]
+    }
+  ],
+  "flow": {
+    "triggers": [
+      {
+        "id": "doorbell_pressed",
+        "title": {
+          "en": "Someone rang the doorbell",
+          "nl": "Er werd aangebeld"
+        },
+        "args": [
+          {
+            "name": "device",
+            "type": "device",
+            "filter": "driver_id=doorbell"
+          }
+        ]
+      }
+    ]
+  }
+}

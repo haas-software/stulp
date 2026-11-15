@@ -716,6 +716,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stulp-esphome"
+version = "3.1.1"
+dependencies = [
+ "stulp-core",
+ "stulp-platform",
+ "stulp-plugin-host",
+ "stulp-protocol",
+ "stulp-runtime",
+ "stulp-sdk",
+]
+
+[[package]]
 name = "stulp-h2"
 version = "3.1.1"
 dependencies = [
@@ -762,6 +774,7 @@ version = "3.1.1"
 dependencies = [
  "applib",
  "stulp-core",
+ "stulp-esphome",
  "stulp-hopos",
  "stulp-matter",
  "stulp-nibe",

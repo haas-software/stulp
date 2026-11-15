@@ -1,4 +1,4 @@
-//! Alle tien plugins in één HopOS-image, met één netwerk en één executor.
+//! Alle elf plugins in één HopOS-image, met één netwerk en één executor.
 #![cfg_attr(target_os = "none", no_std, no_main)]
 applib::main!(bundle);
 #[cfg(not(target_os = "none"))]
@@ -69,6 +69,12 @@ fn start(app: &'static applib::App) -> stulp_core::Result {
         "com.stulp.matter",
         stulp_matter::Matter::default,
         "matter"
+    );
+    plugin!(
+        10,
+        "com.stulp.esphome",
+        stulp_esphome::Esphome::default,
+        "esphome"
     );
     app.log(format_args!(
         "STULP_BUNDLE_READY plugins={started} skipped={skip:?}"

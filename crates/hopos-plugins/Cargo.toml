@@ -22,6 +22,7 @@ stulp-wiim = { path = "../../plugins/wiim", default-features = false }
 stulp-sigenergy = { path = "../../plugins/sigenergy", default-features = false }
 stulp-unifi = { path = "../../plugins/unifi", default-features = false }
 stulp-matter = { path = "../../plugins/matter", default-features = false }
+stulp-esphome = { path = "../../plugins/esphome", default-features = false }
 
 [lints]
 workspace = true
