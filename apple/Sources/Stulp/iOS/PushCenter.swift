@@ -15,6 +15,8 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
 
     private(set) var status: UNAuthorizationStatus = .notDetermined
     private(set) var registered = false
+    /// The phone device in Stulp that notifications go to, once registered.
+    private(set) var phoneName = ""
     var lastError = ""
     /// Set after a tap on a notification that carries a camera; RootView opens that device.
     var openDevice: String?
@@ -40,6 +42,11 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         await refresh(register: true)
     }
 
+    /// Again, from the settings: a token that never came is asked for, one that is here is sent.
+    func retry() async {
+        if token == nil { await refresh(register: true) } else { await send() }
+    }
+
     private func refresh(register: Bool) async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         status = settings.authorizationStatus
@@ -57,15 +64,19 @@ final class PushCenter: NSObject, UNUserNotificationCenterDelegate {
         lastError = "Apple gaf geen push-token: \(error.localizedDescription)"
     }
 
-    /// Also after choosing or registering a phone: the token belongs to that device.
+    /// Also after choosing a phone or connecting: the token belongs to that device. Without a
+    /// phone device (first start, or removed in Stulp) this one is registered first, so allowing
+    /// notifications is the only step.
     func send() async {
         guard let token else { return }
-        guard let connection = try? SharedStulpConfiguration.load(),
-              let settings = StulpPresenceSettings.load(), !settings.phoneId.isEmpty
-        else { return }
+        guard let connection = try? SharedStulpConfiguration.load() else { return }
+        let client = StulpClient(connection: connection, logSource: "ios-push")
         do {
-            try await StulpClient(connection: connection, logSource: "ios-push")
-                .registerPush(deviceId: settings.phoneId, token: token, environment: Self.environment)
+            let current = StulpPresenceSettings.load()
+            let settings = try await client.ensurePhone(current, name: UIDevice.current.name, installation: StulpInstallation.id)
+            if settings != current { try settings.save() }
+            try await client.registerPush(deviceId: settings.phoneId, token: token, environment: Self.environment)
+            phoneName = settings.phoneName
             registered = true
             lastError = ""
         } catch {

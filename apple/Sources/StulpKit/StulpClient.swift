@@ -379,6 +379,22 @@ public struct StulpClient: Sendable {
         ])
     }
 
+    /// This phone's device in Stulp, made when there is none yet or when it was removed in Stulp,
+    /// so notifications never wait for a step in the settings. The chosen phone stays as long as
+    /// Stulp still has it; registering is idempotent per installation, so a second call returns
+    /// the same device. A new one keeps the name the old one had.
+    public func ensurePhone(_ current: StulpPresenceSettings?, name: String, installation: String) async throws -> StulpPresenceSettings {
+        if let current, !current.phoneId.isEmpty, try await phones().contains(where: { $0.id == current.phoneId }) {
+            return current
+        }
+        let wanted = current.map(\.phoneName).flatMap { $0.isEmpty ? nil : $0 } ?? name
+        let phone = try await registerPhone(name: wanted, installation: installation)
+        var settings = current ?? StulpPresenceSettings(phoneId: phone.id, phoneName: phone.name)
+        settings.phoneId = phone.id
+        settings.phoneName = phone.name
+        return settings
+    }
+
     /// This app's APNs token for this device; Stulp sends there.
     public func registerPush(deviceId: String, token: String, environment: String) async throws {
         _ = try await appAPI("com.stulp.notify", method: "POST", path: "register_push", body: [

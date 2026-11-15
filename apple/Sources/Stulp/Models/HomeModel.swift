@@ -90,6 +90,10 @@ final class HomeModel {
         version = health.stulpVersion
         reset()
         start()
+        #if os(iOS)
+        // Notifications already allowed: this phone registers itself with the new Stulp.
+        Task { await PushCenter.shared.send() }
+        #endif
         return health.stulpVersion
     }
 
@@ -431,13 +435,6 @@ final class HomeModel {
     var sceneDevices: [Device] { visibleDevices.filter(\.isScene).sorted(by: Self.tileOrder) }
     var cameras: [Device] {
         visibleDevices.filter { $0.deviceClass == "camera" || $0.deviceClass == "doorbell" }.sorted(by: Self.tileOrder)
-    }
-
-    var presentCategories: [DevicePresentation.Category] {
-        let all = visibleDevices
-        return DevicePresentation.Category.allCases.filter { category in
-            all.contains { DevicePresentation.categories($0).contains(category) }
-        }
     }
 
     func devices(in category: DevicePresentation.Category) -> [Device] {

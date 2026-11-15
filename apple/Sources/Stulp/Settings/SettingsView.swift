@@ -108,7 +108,6 @@ private struct PhoneSections: View {
     @Environment(\.openURL) private var openURL
     @State private var presence = StulpPresenceSettings.load()
     @State private var phones: [Device] = []
-    @State private var newName = ""
     @State private var working = false
     /// The APNs key Stulp signs with: nil while unknown, "" when there is none.
     @State private var pushKeyId: String?
@@ -122,15 +121,20 @@ private struct PhoneSections: View {
 
     var body: some View {
         Group {
+            notificationSection
             phoneSection
             presenceSection
             chargerSection
-            notificationSection
             pushKeySection
         }
         .task {
             await loadPhones()
             await loadPushKey()
+        }
+        // PushCenter registers this phone by itself; the sections below follow.
+        .onChange(of: push.registered) { _, _ in
+            presence = StulpPresenceSettings.load()
+            Task { await loadPhones() }
         }
         .fileImporter(isPresented: $importingKey, allowedContentTypes: [.data]) { result in
             Task { await importKey(result) }
@@ -142,7 +146,7 @@ private struct PhoneSections: View {
             if let presence {
                 LabeledContent("Dit toestel", value: presence.phoneName)
             }
-            if !phones.isEmpty {
+            if phones.count > 1 || (presence == nil && !phones.isEmpty) {
                 Menu {
                     ForEach(phones) { phone in
                         Button(phone.name) { choose(phone) }
@@ -151,18 +155,18 @@ private struct PhoneSections: View {
                     Label(presence == nil ? "Kies een bestaand toestel" : "Kies een ander toestel", systemImage: "iphone")
                 }
             }
-            HStack {
-                TextField("Bijvoorbeeld iPhone van Daphne", text: $newName)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .onSubmit { Task { await register() } }
-                Button("Registreer") { Task { await register() } }
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || working)
+            if presence == nil {
+                Button {
+                    Task { await register() }
+                } label: {
+                    Label("Meld deze telefoon aan bij Stulp", systemImage: "iphone.badge.plus")
+                }
+                .disabled(working)
             }
         } header: {
-            Text("Dit toestel in Stulp")
+            Text("Deze telefoon in Stulp")
         } footer: {
-            Text("Elke telefoon is een eigen apparaat in Stulp. Registreer dit toestel, of kies er een die al bestaat.")
+            Text("Gaat vanzelf zodra je meldingen aanzet. Een andere naam geef je bij het apparaat zelf in Stulp.")
         }
     }
 
@@ -234,9 +238,17 @@ private struct PhoneSections: View {
         Section {
             switch push.status {
             case .authorized, .provisional, .ephemeral:
-                Label(push.registered ? "Meldingen staan aan" : "Toegestaan, nog niet bij Stulp",
-                      systemImage: push.registered ? "checkmark.circle.fill" : "bell.badge")
-                    .foregroundStyle(push.registered ? .green : .orange)
+                if push.registered {
+                    Label("Meldingen komen binnen op \(push.phoneName)", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Button {
+                        Task { await push.retry() }
+                    } label: {
+                        Label("Nog niet bij Stulp: opnieuw aanmelden", systemImage: "arrow.clockwise")
+                            .foregroundStyle(.orange)
+                    }
+                }
             case .denied:
                 Button {
                     openURL(URL(string: UIApplication.openSettingsURLString)!)
@@ -248,9 +260,8 @@ private struct PhoneSections: View {
                 Button {
                     Task { await push.request() }
                 } label: {
-                    Label("Sta meldingen toe", systemImage: "bell.badge")
+                    Label("Zet meldingen aan", systemImage: "bell.badge")
                 }
-                .disabled(presence == nil)
             }
             if !push.lastError.isEmpty {
                 Text(push.lastError).font(.footnote).foregroundStyle(.secondary)
@@ -258,7 +269,7 @@ private struct PhoneSections: View {
         } header: {
             Text("Meldingen")
         } footer: {
-            Text("Stulp stuurt meldingen rechtstreeks naar deze app: gewoon, dringend (door Focus heen) of kritiek, met camerabeeld. Tik op een melding met camerabeeld en de camera gaat open. Kies eerst welk toestel dit is.")
+            Text("Stulp stuurt meldingen rechtstreeks naar deze app: gewoon, dringend (door Focus heen) of kritiek, met camerabeeld. Tik op een melding met camerabeeld en de camera gaat open. Deze telefoon meldt zich daarbij zelf aan.")
         }
     }
 
@@ -364,16 +375,17 @@ private struct PhoneSections: View {
         do { phones = try await client.phones() } catch { model.report(error) }
     }
 
+    /// Without notifications too (thuis en weg, de lader): this phone as a device in Stulp.
     private func register() async {
-        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, let client = model.client else { return }
+        guard let client = model.client else { return }
         working = true
         defer { working = false }
         do {
-            let phone = try await client.registerPhone(name: name, installation: StulpInstallation.id)
-            newName = ""
-            choose(phone)
+            let settings = try await client.ensurePhone(presence, name: UIDevice.current.name, installation: StulpInstallation.id)
+            try settings.save()
+            presence = settings
             await loadPhones()
+            await PushCenter.shared.send()
         } catch {
             model.report(error)
         }

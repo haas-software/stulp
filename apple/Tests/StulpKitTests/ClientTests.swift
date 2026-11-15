@@ -191,3 +191,29 @@ final class Counter: @unchecked Sendable {
         }
     }
 }
+
+@Suite("Deze telefoon")
+struct PhoneRegistrationTests {
+    /// A phone removed in Stulp is made again, with its old name; one that is still there stays.
+    @Test func aRemovedPhoneIsRegisteredAgain() async throws {
+        let (client, host) = StubProtocol.client { seen in
+            switch (seen.method, seen.path) {
+            case ("GET", "/api/manager/devices/device"):
+                .json(#"{"p2":{"id":"p2","name":"iPad","appId":"com.stulp.notify","driverId":"stulp:app:com.stulp.notify:phone","class":"phone","capabilities":[],"capabilitiesObj":{},"available":true}}"#)
+            case ("POST", "/api/stulp/apps/com.stulp.notify/drivers/phone/pair/devices"):
+                .json(#"{"id":"p3","name":"iPhone Derek","appId":"com.stulp.notify","driverId":"stulp:app:com.stulp.notify:phone","class":"phone","capabilities":[],"capabilitiesObj":{},"available":true}"#)
+            default: .json("true")
+            }
+        }
+        let gone = StulpPresenceSettings(phoneId: "p1", phoneName: "iPhone Derek")
+        let again = try await client.ensurePhone(gone, name: "iPhone", installation: "inst-1")
+        #expect(again.phoneId == "p3")
+        #expect(again.phoneName == "iPhone Derek")
+        let add = try #require(StubProtocol.requests(host).first { $0.method == "POST" })
+        #expect(add.json == ["name": "iPhone Derek", "data": ["kind": "app", "installation": "inst-1"]])
+
+        let kept = try await client.ensurePhone(StulpPresenceSettings(phoneId: "p2", phoneName: "iPad"), name: "iPhone", installation: "inst-1")
+        #expect(kept.phoneId == "p2")
+        #expect(StubProtocol.requests(host).filter { $0.method == "POST" }.count == 1)
+    }
+}

@@ -4,11 +4,11 @@ import SwiftUI
 /// The places in the app. On iPhone a tab bar with Thuis and the house's first level of places
 /// (floors, or rooms in a flat house), each with its icon, so one tap takes you there; Automatisering,
 /// Meldingen and Instellingen sit in the menu at the top. On iPad the same tabs as a sidebar, with
-/// the categories, Automatisering and Instellingen in it too; on the Mac a sidebar window with
-/// Settings in ⌘,.
+/// Automatisering and Instellingen in it too; on the Mac a sidebar window with Settings in ⌘,.
+/// Only the places the house itself has: what kind of device something is (temperature, lights)
+/// is already at the top of every place, so it gets no entry of its own here.
 enum AppTab: Hashable {
     case home
-    case category(DevicePresentation.Category)
     case room(String)
     case automations
     case notifications
@@ -107,13 +107,6 @@ struct RootView: View {
             // Only with a sidebar (iPad, an open Duo); on an iPhone they are in the menu at the top,
             // so the tab bar holds the places.
             if width == .regular {
-                TabSection("Categorieën") {
-                    ForEach(model.presentCategories) { category in
-                        Tab(category.title, systemImage: category.symbol, value: AppTab.category(category)) {
-                            NavigationStack { CategoryView(category: category) }
-                        }
-                    }
-                }
                 Tab("Automatisering", systemImage: "clock.fill", value: AppTab.automations) {
                     NavigationStack { FlowsView() }
                 }
@@ -129,10 +122,10 @@ struct RootView: View {
             if case .room(let id) = tab, model.group(id) == nil { tab = .home }
         }
         .onChange(of: width, initial: true) { _, new in
-            // Folding the Duo shut takes the sidebar's categories, Automatisering and Instellingen
-            // away; they are in the menu at the top then.
+            // Folding the Duo shut takes the sidebar's Automatisering and Instellingen away; they
+            // are in the menu at the top then.
             switch tab {
-            case .category, .automations, .settings, .notifications, .apps: if new != .regular { tab = .home }
+            case .automations, .settings, .notifications, .apps: if new != .regular { tab = .home }
             default: break
             }
         }
@@ -152,9 +145,6 @@ private struct MacRootView: View {
             List(selection: Binding(get: { tab }, set: { if let new = $0 { tab = new } })) {
                 Section {
                     Label("Thuis", systemImage: "house.fill").tag(AppTab.home)
-                    ForEach(model.presentCategories) { category in
-                        Label(category.title, systemImage: category.symbol).tag(AppTab.category(category))
-                    }
                 }
                 Section("Locaties") {
                     ForEach(model.children(of: nil)) { group in
@@ -175,7 +165,6 @@ private struct MacRootView: View {
             Group {
                 switch tab {
                 case .home: NavigationStack { HomeView() }
-                case .category(let category): NavigationStack { CategoryView(category: category) }
                 case .room(let id): NavigationStack { HomeView(scope: id) }
                 case .automations: NavigationStack { FlowsView() }
                 case .notifications: NavigationStack { NotificationsView() }
