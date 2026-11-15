@@ -27,7 +27,14 @@ final class HomeModel {
     private(set) var phase: Phase = .connecting
     private(set) var version = ""
 
-    private(set) var devices: [String: Device] = [:]
+    private(set) var devices: [String: Device] = [:] {
+        didSet { checkDoorbells() }
+    }
+    /// Doorbells whose app delivers a picture. Not every doorbell has a camera (an ESPHome bell
+    /// is a button and a chime), so a doorbell only counts as a camera once Stulp lists a picture
+    /// or video for it; a camera always does.
+    private(set) var doorbellsWithPicture: Set<String> = []
+    @ObservationIgnored private var checkedDoorbells: Set<String> = []
     private(set) var groups: [DeviceGroup] = []
     private(set) var scenes: [StulpScene] = []
     private(set) var flows: [Flow] = []
@@ -434,7 +441,28 @@ final class HomeModel {
 
     var sceneDevices: [Device] { visibleDevices.filter(\.isScene).sorted(by: Self.tileOrder) }
     var cameras: [Device] {
-        visibleDevices.filter { $0.deviceClass == "camera" || $0.deviceClass == "doorbell" }.sorted(by: Self.tileOrder)
+        visibleDevices.filter(isCamera).sorted(by: Self.tileOrder)
+    }
+
+    func isCamera(_ device: Device) -> Bool {
+        device.deviceClass == "camera" || (device.deviceClass == "doorbell" && doorbellsWithPicture.contains(device.id))
+    }
+
+    /// Once per doorbell: does its app register a picture?
+    private func checkDoorbells() {
+        let unchecked = devices.values.filter { $0.deviceClass == "doorbell" && !checkedDoorbells.contains($0.id) }.map(\.id)
+        guard !unchecked.isEmpty, let client else { return }
+        checkedDoorbells.formUnion(unchecked)
+        Task {
+            for id in unchecked {
+                do {
+                    if try await !client.media(id).isEmpty { doorbellsWithPicture.insert(id) }
+                } catch {
+                    // Asked again with the next snapshot.
+                    checkedDoorbells.remove(id)
+                }
+            }
+        }
     }
 
     func devices(in category: DevicePresentation.Category) -> [Device] {
@@ -451,6 +479,7 @@ final class HomeModel {
     /// Used by previews and `-stulpDemo YES`: a filled house without a server.
     func fillDemo(devices: [Device], groups: [DeviceGroup], flows: [Flow] = [], version: String = "demo") {
         self.devices = Dictionary(devices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        doorbellsWithPicture = Set(devices.filter { $0.deviceClass == "doorbell" }.map(\.id))
         self.groups = groups
         self.flows = flows
         self.version = version

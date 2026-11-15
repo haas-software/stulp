@@ -115,7 +115,7 @@ struct HomeView: View {
             }
         }
 
-        let cameras = all.filter(Self.isCamera)
+        let cameras = all.filter(model.isCamera)
         if !cameras.isEmpty {
             Section {
                 CameraStrip(cameras: cameras)
@@ -162,13 +162,9 @@ struct HomeView: View {
             destination: HomeRoute.room(group.id))
     }
 
-    static func isCamera(_ device: Device) -> Bool {
-        device.deviceClass == "camera" || device.deviceClass == "doorbell"
-    }
-
     /// Scenes and cameras have their own rows above.
     private func tiles(_ devices: [Device]) -> [Device] {
-        devices.filter { !$0.isScene && !Self.isCamera($0) }
+        devices.filter { !$0.isScene && !model.isCamera($0) }
     }
 
     /// "Woonkamer › Bank" for Beneden › Woonkamer › Bank: the location is already the subtitle.

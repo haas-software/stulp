@@ -76,7 +76,7 @@ private struct DeviceDetailContent: View {
                 }
             }
 
-            if device.deviceClass == "camera" || device.deviceClass == "doorbell" {
+            if model.isCamera(device) {
                 CameraSection(device: device)
             }
 
